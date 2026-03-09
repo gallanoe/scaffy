@@ -2,54 +2,67 @@
 
 ## Overview
 
-Scaffy is a TUI-based LLM agent scaffold built in Rust. It provides a chat interface with streaming responses, tool calling, and an internal conversation model decoupled from any LLM provider's wire format. The initial backend is OpenRouter (via `async-openai`'s configurable base URL).
+Scaffy is a TUI-based LLM agent scaffold built in Go. It provides a chat interface with streaming responses, tool calling, and an internal conversation model decoupled from any LLM provider's wire format. The initial backend is OpenRouter (via `go-openai`'s configurable base URL).
 
 ## Dependencies
 
-```toml
-[dependencies]
-async-openai = "0.27"
-tokio = { version = "1", features = ["full"] }
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-dotenvy = "0.15"
-anyhow = "1"
-async-trait = "0.1"
-tracing = "0.1"
-tracing-subscriber = "0.3"
-ratatui = "0.29"
-crossterm = "0.28"
-tui-textarea = "0.7"
-uuid = { version = "1", features = ["v4"] }
-futures = "0.3"
-```
+| Purpose | Package |
+|---------|---------|
+| LLM API | `github.com/sashabaranov/go-openai` |
+| TUI framework | `github.com/charmbracelet/bubbletea` (v1) |
+| Text input | `github.com/charmbracelet/bubbles/textarea` |
+| Scrollable area | `github.com/charmbracelet/bubbles/viewport` |
+| Styling | `github.com/charmbracelet/lipgloss` |
+| UUIDs | `github.com/google/uuid` |
+| .env loading | `github.com/joho/godotenv` |
+| JSON | `encoding/json` (stdlib) |
+| Logging | `log/slog` (stdlib, to file) |
 
 ### Dependency Notes
 
-- `async-openai` provides streaming, tool calling, and built-in retry with exponential backoff on rate limits. Configurable base URL supports OpenRouter and any OpenAI-compatible provider.
-- `futures` is needed for `StreamExt` to consume `async-openai`'s streaming responses.
-- `tui-textarea 0.7` targets `ratatui 0.29` + `crossterm 0.28` — verified compatible.
-- No `chrono` — timestamps use `std::time::SystemTime`.
-
-All dependencies added via `cargo add`.
+- `go-openai` provides streaming, tool calling, and configurable base URL supporting OpenRouter and any OpenAI-compatible provider.
+- Bubbletea v1 (stable) implements The Elm Architecture for TUI applications.
+- No external time packages — timestamps use `time.Time` from stdlib.
 
 ## Project Structure
 
 ```
-src/
-  main.rs          — entry point, terminal setup, event loop
-  app.rs           — app state, event dispatch
-  conversation.rs  — internal message model (ChatMessage, Conversation, Role)
-  tools.rs         — ToolHandler trait, ToolRegistry
-  ui.rs            — Ratatui layout and rendering
-  llm_client.rs    — OpenRouter integration via async-openai
+scaffy/
+  cmd/scaffy/main.go                     -- entry point
+  internal/
+    config/config.go                      -- env var loading, Config struct
+    config/config_test.go
+    conversation/conversation.go          -- ChatMessage, Conversation, Role, ToolCall types
+    conversation/conversation_test.go
+    conversation/openai.go                -- ToOpenAIMessages(), PushFromResponse()
+    conversation/openai_test.go
+    tools/tools.go                        -- ToolHandler interface, ToolRegistry
+    tools/echo.go                         -- EchoTool
+    tools/tools_test.go
+    llmclient/client.go                   -- LlmClient, config
+    llmclient/stream.go                   -- StreamMsg types, ToolCallAccumulator
+    llmclient/stream_test.go
+    tui/model.go                          -- Bubbletea Model
+    tui/update.go                         -- Update() handler (event dispatch)
+    tui/view.go                           -- View() renderer
+    tui/messages.go                       -- tea.Msg types
+    tui/model_test.go                     -- TUI integration tests
+  .golangci.yml
+  .github/workflows/ci.yml
+  .env.example
+  .gitignore
+  docs/SPEC.md
+  go.mod
+  go.sum
+  Makefile
+  LICENSE
 ```
 
 ---
 
-## Internal Conversation Model (`conversation.rs`)
+## Internal Conversation Model (`internal/conversation/`)
 
-Decoupled from `async-openai`'s types so we can:
+Decoupled from `go-openai`'s types so we can:
 - Add metadata (timestamps, IDs, token counts)
 - Persist conversations without depending on a provider's types
 - Transform messages before sending (truncation, summarization)
@@ -57,43 +70,40 @@ Decoupled from `async-openai`'s types so we can:
 
 ### Types
 
-```rust
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub enum Role {
-    System,
-    User,
-    Assistant,
-    Tool,
+```go
+type Role string
+
+const (
+    RoleSystem    Role = "system"
+    RoleUser      Role = "user"
+    RoleAssistant Role = "assistant"
+    RoleTool      Role = "tool"
+)
+
+type ToolCall struct {
+    ID        string          `json:"id"`
+    Name      string          `json:"name"`
+    Arguments json.RawMessage `json:"arguments"`
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct ToolCall {
-    pub id: String,
-    pub name: String,
-    pub arguments: serde_json::Value,
+type ToolResult struct {
+    ToolCallID string `json:"tool_call_id"`
+    Content    string `json:"content"`
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct ToolResult {
-    pub tool_call_id: String,
-    pub content: String,
+type MessageMetadata struct {
+    ID         uuid.UUID `json:"id"`
+    Timestamp  time.Time `json:"timestamp"`
+    Model      string    `json:"model,omitempty"`
+    TokenCount int       `json:"token_count,omitempty"`
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct MessageMetadata {
-    pub id: Uuid,
-    pub timestamp: std::time::SystemTime,
-    pub model: Option<String>,
-    pub token_count: Option<u32>,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct ChatMessage {
-    pub role: Role,
-    pub content: Option<String>,
-    pub tool_calls: Option<Vec<ToolCall>>,
-    pub tool_result: Option<ToolResult>,
-    pub metadata: MessageMetadata,
+type ChatMessage struct {
+    Role       Role            `json:"role"`
+    Content    string          `json:"content,omitempty"`
+    ToolCalls  []ToolCall      `json:"tool_calls,omitempty"`
+    ToolResult *ToolResult     `json:"tool_result,omitempty"`
+    Metadata   MessageMetadata `json:"metadata"`
 }
 ```
 
@@ -101,412 +111,187 @@ pub struct ChatMessage {
 
 Type-safe constructors prevent invalid states:
 
-```rust
-impl ChatMessage {
-    pub fn system(content: &str) -> Self;
-    pub fn user(content: &str) -> Self;
-    pub fn assistant(content: &str) -> Self;
-    pub fn assistant_tool_calls(calls: Vec<ToolCall>) -> Self;
-    pub fn tool_result(tool_call_id: &str, content: &str) -> Self;
-}
+```go
+func NewSystemMessage(content string) ChatMessage
+func NewUserMessage(content string) ChatMessage
+func NewAssistantMessage(content string) ChatMessage
+func NewAssistantToolCallsMessage(calls []ToolCall) ChatMessage
+func NewToolResultMessage(toolCallID, content string) ChatMessage
 ```
 
 ### Conversation Methods
 
-```rust
-impl Conversation {
-    pub fn new() -> Self;
-    pub fn push(&mut self, message: ChatMessage);
-    pub fn len(&self) -> usize;
-    pub fn is_empty(&self) -> bool;
-    pub fn last_assistant_message(&self) -> Option<&ChatMessage>;
-    pub fn clear(&mut self);
-
-    /// Convert internal messages to async-openai request messages
-    pub fn to_openai_messages(&self) -> Vec<ChatCompletionRequestMessage>;
-
-    /// Convert an async-openai response back into our internal types
-    pub fn push_from_response(&mut self, response: &CreateChatCompletionResponse);
-}
+```go
+func (c *Conversation) Push(msg ChatMessage)
+func (c *Conversation) Len() int
+func (c *Conversation) IsEmpty() bool
+func (c *Conversation) LastAssistantMessage() *ChatMessage
+func (c *Conversation) Clear()
+func (c *Conversation) ToOpenAIMessages() []openai.ChatCompletionMessage
+func (c *Conversation) PushFromResponse(resp openai.ChatCompletionResponse)
 ```
 
 ---
 
-## Tool System (`tools.rs`)
+## Tool System (`internal/tools/`)
 
-### ToolHandler Trait
+### ToolHandler Interface
 
-```rust
-#[async_trait]
-pub trait ToolHandler: Send + Sync {
-    /// Unique name matching what the LLM will call
-    fn name(&self) -> &str;
-
-    /// Human-readable description for the LLM
-    fn description(&self) -> &str;
-
-    /// JSON Schema describing the expected arguments
-    fn parameters_schema(&self) -> serde_json::Value;
-
-    /// Execute the tool with parsed arguments, return result as string
-    async fn execute(&self, args: serde_json::Value) -> Result<String>;
+```go
+type ToolHandler interface {
+    Name() string
+    Description() string
+    ParametersSchema() json.RawMessage
+    Execute(ctx context.Context, args json.RawMessage) (string, error)
 }
 ```
 
 ### ToolRegistry
 
-```rust
-pub struct ToolRegistry {
-    handlers: HashMap<String, Box<dyn ToolHandler>>,
-}
-
-impl ToolRegistry {
-    pub fn new() -> Self;
-    pub fn register(&mut self, handler: impl ToolHandler + 'static);
-    pub fn get(&self, name: &str) -> Option<&dyn ToolHandler>;
-
-    /// Convert all registered tools to async-openai ChatCompletionTool types
-    pub fn to_openai_tools(&self) -> Vec<ChatCompletionToolArgs>;
-
-    /// Execute a tool call by name, returns the result string
-    pub async fn execute(&self, tool_call: &ToolCall) -> Result<String>;
-}
-```
-
-### Integration with async-openai
-
-Each `ToolHandler` maps to a `ChatCompletionToolArgs`:
-
-```rust
-ChatCompletionToolArgs::default()
-    .r#type(ChatCompletionToolType::Function)
-    .function(
-        FunctionObjectArgs::default()
-            .name(handler.name())
-            .description(handler.description())
-            .parameters(handler.parameters_schema())
-            .build()?
-    )
-    .build()?
+```go
+func NewRegistry() *ToolRegistry
+func (r *ToolRegistry) Register(handler ToolHandler)
+func (r *ToolRegistry) Get(name string) (ToolHandler, bool)
+func (r *ToolRegistry) ToOpenAITools() []openai.Tool
+func (r *ToolRegistry) Execute(ctx context.Context, call *ToolCall) (string, error)
+func (r *ToolRegistry) IsEmpty() bool
 ```
 
 ---
 
-## Stream Events (`llm_client.rs`)
+## Stream Events (`internal/llmclient/`)
 
-`async-openai` streams `CreateChatCompletionStreamResponse` items containing `ChatChoiceDelta` variants. We define our own event type to decouple from the crate:
+`go-openai` streams `ChatCompletionStreamResponse` items. We define our own `StreamMsg` type to decouple from the library:
 
-```rust
-pub enum StreamEvent {
-    /// A chunk of text content
-    Token(String),
+```go
+type StreamMsgType int
 
-    /// A tool call is being assembled (partial arguments arriving)
-    ToolCallStart { index: usize, id: String, name: String },
+const (
+    StreamMsgToken StreamMsgType = iota
+    StreamMsgToolCallStart
+    StreamMsgToolCallArgDelta
+    StreamMsgToolCallComplete
+    StreamMsgDone
+    StreamMsgError
+)
 
-    /// A fragment of tool call arguments (JSON being streamed)
-    ToolCallArgDelta { index: usize, arguments: String },
-
-    /// A fully assembled tool call, ready to execute
-    ToolCallComplete(ToolCall),
-
-    /// Stream finished
-    Done { stop_reason: Option<String> },
-
-    /// LLM or network error
-    Error(String),
+type StreamMsg struct {
+    Type       StreamMsgType
+    Token      string
+    ToolCall   *conversation.ToolCall
+    Index      int
+    ID         string
+    Name       string
+    ArgDelta   string
+    StopReason string
+    Error      string
 }
 ```
 
 ### Stream Parsing
 
-The `LlmClient` accumulates streamed tool calls and converts to `StreamEvent`:
+The `ToolCallAccumulator` assembles streamed tool calls:
 
-```rust
-/// Accumulator for assembling streamed tool calls
-struct ToolCallAccumulator {
-    calls: HashMap<usize, PartialToolCall>,
+```go
+type ToolCallAccumulator struct {
+    Calls map[int]*PartialToolCall
 }
 
-struct PartialToolCall {
-    id: String,
-    name: String,
-    arguments: String,  // JSON fragments appended as they arrive
-}
-
-impl ToolCallAccumulator {
-    fn process_delta(&mut self, delta: &ChatCompletionMessageToolCallChunk) -> Option<StreamEvent>;
-    fn finalize(self) -> Vec<ToolCall>;
-}
-```
-
-Each `ChatChoiceDelta` is inspected:
-- `delta.content` → `StreamEvent::Token`
-- `delta.tool_calls[i]` with `id` + `function.name` → `StreamEvent::ToolCallStart`
-- `delta.tool_calls[i]` with `function.arguments` fragment → `StreamEvent::ToolCallArgDelta`
-- `finish_reason == "tool_calls"` → finalize accumulator → `StreamEvent::ToolCallComplete` for each
-- `finish_reason == "stop"` → `StreamEvent::Done`
-
-This keeps the rest of the app (event loop, UI) independent of `async-openai`'s types.
-
----
-
-## LLM Client (`llm_client.rs`)
-
-Wraps `async-openai` and exposes a clean async interface.
-
-### Configuration
-
-```rust
-pub struct LlmClientConfig {
-    pub base_url: String,     // e.g. "https://openrouter.ai/api/v1"
-    pub api_key: String,      // from env: OPENROUTER_API_KEY
-    pub model: String,        // e.g. "anthropic/claude-sonnet-4"
-    pub max_tokens: u32,
-    pub temperature: f32,
-    pub system_prompt: Option<String>,
-}
-```
-
-Uses `async-openai`'s configurable `OpenAIConfig` under the hood:
-
-```rust
-let config = OpenAIConfig::new()
-    .with_api_key(&config.api_key)
-    .with_api_base(&config.base_url);
-
-let client = Client::with_config(config);
-```
-
-### Retry Behavior
-
-`async-openai` provides built-in retry with exponential backoff on rate-limit responses (HTTP 429). This covers OpenRouter's rate limiting out of the box. For other transient errors (5xx, timeouts), we wrap calls with a simple retry layer:
-
-```rust
-/// Retry config for transient failures beyond rate limits
-pub struct RetryConfig {
-    pub max_retries: u32,         // default: 3
-    pub initial_backoff_ms: u64,  // default: 1000
-    pub max_backoff_ms: u64,      // default: 30000
-    pub backoff_multiplier: f64,  // default: 2.0
-}
-```
-
-### Methods
-
-```rust
-impl LlmClient {
-    pub fn new(config: LlmClientConfig) -> Result<Self>;
-
-    /// Streaming chat — sends StreamEvents through the provided channel.
-    /// Returns immediately; tokens arrive asynchronously via the sender.
-    pub async fn chat_stream(
-        &self,
-        messages: &[ChatCompletionRequestMessage],
-        tools: Option<&[ChatCompletionToolArgs]>,
-        tx: mpsc::Sender<StreamEvent>,
-    );
-}
-```
-
-The single `chat_stream` method handles both tool and non-tool cases. When `tools` is `None`, `ToolCall*` events will never be emitted. The channel-based design means the event loop never blocks on LLM I/O.
-
-Internally, `chat_stream` builds a `CreateChatCompletionRequest` and calls `client.chat().create_stream()`:
-
-```rust
-let mut request = CreateChatCompletionRequestArgs::default()
-    .model(&self.config.model)
-    .max_tokens(self.config.max_tokens)
-    .temperature(self.config.temperature)
-    .messages(messages)
-    .build()?;
-
-if let Some(tools) = tools {
-    request.tools = Some(tools.to_vec());
-}
-
-let mut stream = self.client.chat().create_stream(request).await?;
-
-while let Some(result) = stream.next().await {
-    match result {
-        Ok(response) => {
-            // Parse ChatChoiceDelta into StreamEvents via accumulator
-            // Send each event through tx
-        }
-        Err(e) => {
-            let _ = tx.send(StreamEvent::Error(e.to_string())).await;
-            break;
-        }
-    }
-}
+func (a *ToolCallAccumulator) ProcessDelta(chunk openai.ToolCall) (StreamMsg, bool)
+func (a *ToolCallAccumulator) Finalize() []conversation.ToolCall
 ```
 
 ---
 
-## TUI (`ui.rs`)
+## LLM Client (`internal/llmclient/`)
+
+Wraps `go-openai` and exposes a clean interface.
+
+```go
+func NewLlmClient(apiKey, baseURL, model string, maxTokens int, temperature float64) *LlmClient
+func (c *LlmClient) ChatStream(ctx context.Context, messages []openai.ChatCompletionMessage, tools []openai.Tool) <-chan StreamMsg
+```
+
+`ChatStream` starts a goroutine that sends `StreamMsg` values to the returned channel. The channel is closed when the stream ends. Cancel the context to abandon the stream.
+
+---
+
+## TUI (`internal/tui/`)
+
+Uses The Elm Architecture (Bubbletea): `Init() -> Cmd`, `Update(Msg) -> (Model, Cmd)`, `View() -> string`.
 
 ### Layout
 
 ```
 +-----------------------------------------------+
-|  Model: anthropic/claude-sonnet-4  | streaming |  <- Status bar
-+-----------------------------------------------+
 |                                                 |
-|  User: What's the weather in Paris?             |
+|  System: You are a helpful assistant.           |
 |                                                 |
-|  Assistant: I'll check the weather for you.     |
+|  What's the weather in Paris?                   |
 |                                                 |
-|  [Tool Call: get_weather(city: "Paris")]         |  <- Truncated, expandable
-|  [Tool Result: 15C, partly cloudy]              |  <- Truncated, expandable
+|  I'll check the weather for you.                |
 |                                                 |
-|  Assistant: The weather in Paris is 15C and     |
-|  partly cloudy.                                 |
+|  [Tool: get_weather({"city": "Paris"})]         |  <- Truncated, expandable
+|  [Result: 15C, partly cloudy]                   |  <- Truncated, expandable
 |                                                 |
-+-----------------------------------------------+
-|  > Type a message...                            |  <- tui-textarea (multi-line)
+|  The weather in Paris is 15°C and partly cloudy.|
 |                                                 |
 +-----------------------------------------------+
-|  Error: Connection timed out                    |  <- Error bar (only when error)
+| ╭─────────────────────────────────────────────╮ |
+| │ Type a message...                           │ |  <- textarea (multi-line)
+| ╰─────────────────────────────────────────────╯ |
++-----------------------------------------------+
+|  Error: Connection timed out (Esc to dismiss) |  <- Error bar (only when error)
 +-----------------------------------------------+
 ```
 
 ### Panels
 
-1. **Status bar** (top) — model name, streaming indicator, token count
-2. **Message history** (center, scrollable) — all messages rendered by role
-3. **Input area** (bottom) — `tui-textarea` widget for multi-line input
-4. **Error bar** (bottom, conditional) — shown only when an error occurs, dismissed with Esc
-
-### Tool Call/Result Display
-
-- Tool calls and results are shown inline in the message history
-- Truncated by default (single line summary)
-- Expandable: press Enter when the cursor is on a tool block to toggle full view
-- Visual distinction: different color/border from regular messages
+1. **Message history** (top, scrollable via viewport) — all messages rendered by role
+2. **Input area** (bottom) — bubbles textarea with focus-aware border
+3. **Error bar** (bottom, conditional) — shown only when an error occurs, dismissed with Esc
 
 ### Keybindings
 
 | Key | Action |
 |-----|--------|
 | Enter | Send message (when input focused) |
-| Shift+Enter | Newline in input |
+| Alt+Enter | Newline in input |
 | Ctrl+C | Quit |
-| Up/Down | Move cursor through messages (when history focused) |
+| Up/Down | Navigate messages (when history focused) |
 | Tab | Toggle focus between input and history |
 | Enter (on tool block) | Expand/collapse tool call/result |
-| Esc | Clear error / cancel / return focus to input |
+| Esc | Clear error / return focus to input |
 
----
+### Streaming Pattern
 
-## App State (`app.rs`)
+LLM streaming runs in a goroutine that writes `StreamMsg` values to a Go channel. A `tea.Cmd` reads one event at a time from this channel and returns it as a `tea.Msg`. Each `Update()` call processes the event and returns another listener `Cmd` to read the next event:
 
-```rust
-pub enum AppFocus {
-    Input,
-    History,
-}
-
-pub enum StreamingState {
-    Idle,
-    Streaming { partial_content: String },
-    Error(String),
-}
-
-/// Wrapper sent through the event channel. Tags StreamEvents with the
-/// generation that produced them so the event loop can discard stale ones.
-pub enum AppEvent {
-    Key(crossterm::event::KeyEvent),
-    Stream { generation: u64, event: StreamEvent },
-}
-
-pub struct App {
-    pub conversation: Conversation,
-    pub tool_registry: ToolRegistry,
-    pub textarea: TextArea<'static>,
-    pub focus: AppFocus,
-    pub streaming: StreamingState,
-    pub stream_generation: u64,                    // bumped each time a new stream is spawned
-    pub scroll_offset: u16,
-    pub selected_message: Option<usize>,           // cursor index into history
-    pub expanded_tool_blocks: HashSet<Uuid>,        // message IDs of expanded tool blocks
-    pub should_quit: bool,
+```go
+func waitForStream(ch <-chan StreamMsg, gen uint64) tea.Cmd {
+    return func() tea.Msg {
+        event, ok := <-ch
+        if !ok { return StreamDoneMsg{Generation: gen} }
+        return StreamTickMsg{Generation: gen, Event: event}
+    }
 }
 ```
 
-Generation tracking lives entirely in `App` — the `LlmClient` has no knowledge of generations. When spawning a stream or tool-execution task, the caller captures `app.stream_generation` into the task closure and wraps each `StreamEvent` in `AppEvent::Stream { generation, event }` before sending. The event loop checks `generation == app.stream_generation` and silently drops mismatches.
-
----
-
-## Event Loop (`main.rs`)
-
-Architecture: tokio + crossterm event polling with channel-based message passing.
-
-```mermaid
-graph LR
-  Terminal["Terminal<br/>Events"] -->|AppEvent::Key| Channel["app_rx<br/>channel"]
-  LLM["LLM<br/>Stream"] -->|"AppEvent::Stream<br/>{generation, event}"| Channel
-  Tool["Tool<br/>Exec"] -->|"AppEvent::Stream<br/>{generation, event}"| Channel
-  Channel --> EventLoop["Event Loop"]
-  EventLoop -->|draw| Render["render()"]
-```
-
-```rust
-#[tokio::main]
-async fn main() -> Result<()> {
-    // 1. Load .env
-    // 2. Init tracing (to file, not stdout — stdout is the TUI)
-    // 3. Setup terminal (crossterm raw mode, alternate screen)
-    // 4. Create App state with ToolRegistry
-    // 5. Create LlmClient
-    // 6. Run event loop (single channel for all AppEvents):
-    //    match app_rx.recv().await {
-    //        AppEvent::Key(key) => handle_input(key),
-    //        AppEvent::Stream { generation, event } => {
-    //            if generation == app.stream_generation {
-    //                handle_stream_event(event);
-    //            }
-    //            // else: stale generation, silently discard
-    //        }
-    //    }
-    //    terminal.draw(|f| ui::render(f, &app))?;
-    // 7. Restore terminal on exit
-}
-```
+Generation-based stale event filtering is preserved: each `StreamTickMsg` carries a generation, and `Update()` discards messages where `msg.Generation != m.streamGeneration`.
 
 ---
 
 ## Agent Loop (tool calling)
 
-The agent loop is driven entirely through the event loop's channel. The UI remains responsive throughout.
+The agent loop is driven through Bubbletea's command system. The UI remains responsive throughout.
 
-Note: Tool calls are executed serially in v1. Parallel tool calling (multiple tool calls in a single response) is deferred — the accumulator and stream parsing support it structurally, but execution is sequential.
+1. User sends message → increment generation → start stream
+2. `StreamTickMsg` with `Token` → append to partial content
+3. `StreamTickMsg` with `ToolCallComplete` → finalize partial content, push tool call message, execute tool as `tea.Cmd`
+4. `ToolResultMsg` → push result, increment generation, start new stream
+5. `StreamTickMsg` with `Done` → finalize assistant message, set idle
 
-```mermaid
-flowchart TD
-  A["User sends message"] --> A2["app.stream_generation += 1"]
-  A2 --> B["Spawn task:<br/>LlmClient::chat_stream(messages, tools, tx)<br/>Task captures current generation,<br/>wraps events in AppEvent::Stream"]
-  B --> C{"Event loop receives<br/>AppEvent::Stream<br/>(generation matches?)"}
-
-  C -->|"Token(s)"| D["Append to partial_content<br/>Re-render"]
-  D --> C
-
-  C -->|"ToolCallComplete(call)"| E["1. Add assistant tool-call<br/>message to conversation<br/>2. Display in UI (truncated)"]
-  E --> F["3. Spawn task:<br/>tool_registry.execute(&call)"]
-  F --> G["4. Send ToolResult<br/>back as AppEvent::Stream"]
-  G --> H["5. Add tool-result message<br/>to conversation<br/>6. Display in UI (truncated)"]
-  H --> I["7. app.stream_generation += 1<br/>Re-send conversation to LLM<br/>(spawn new stream task)"]
-  I --> C
-
-  C -->|"Done"| J["Finalize assistant message<br/>Set state to Idle"]
-
-  C -->|"Error(e)"| K["Set StreamingState::Error(e)<br/>Display in error bar"]
-
-  C -->|"Stale generation"| L["Silently discard"]
-```
-
-Tool execution is spawned as a separate tokio task so the UI never blocks. Results flow back through the same `AppEvent` channel as LLM tokens, tagged with the generation that initiated them.
-
-When re-sending the conversation after tool execution (step 7), `app.stream_generation` is bumped and a new stream task is spawned capturing the new value. Any in-flight events from the previous stream arrive with the old generation and are silently discarded by the event loop.
+Tool execution runs as a `tea.Cmd` (goroutine managed by Bubbletea). Results flow back as `ToolResultMsg` values, tagged with the generation that initiated them.
 
 ---
 
@@ -520,6 +305,25 @@ SCAFFY_MODEL=anthropic/claude-sonnet-4
 SCAFFY_MAX_TOKENS=4096
 SCAFFY_TEMPERATURE=0.7
 SCAFFY_SYSTEM_PROMPT="You are a helpful assistant."
+SCAFFY_ECHO_TOOL=1
+```
+
+---
+
+## Building & Running
+
+```bash
+# Build
+make build
+
+# Run
+make run
+
+# Test
+make test
+
+# Lint
+make lint
 ```
 
 ---

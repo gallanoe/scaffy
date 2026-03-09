@@ -1,4 +1,5 @@
-/target
+/scaffy
+coverage.out
 .env
 scaffy.log
 .claude/settings.local.json
