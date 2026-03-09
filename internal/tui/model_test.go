@@ -141,7 +141,7 @@ func TestViewRendersToolCalls(t *testing.T) {
 
 	view := m.View()
 
-	if !containsString(view, "echo") {
+	if !containsString(view, "Echo") {
 		t.Error("expected tool name in view")
 	}
 }

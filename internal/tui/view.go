@@ -201,7 +201,7 @@ func (m Model) toolStatusIcon(callID string) string {
 }
 
 func (m Model) formatToolCall(call conversation.ToolCall, expanded bool) string {
-	name := m.styles.Tool.Name.Render(call.Name)
+	name := m.styles.Tool.Name.Render(snakeToCamel(call.Name))
 	if expanded {
 		var prettyArgs any
 		if err := json.Unmarshal(call.Arguments, &prettyArgs); err == nil {
@@ -228,4 +228,14 @@ func (m Model) formatToolResult(result conversation.ToolResult, expanded bool) s
 		content = content[:80] + "..."
 	}
 	return label + m.styles.Tool.ResultContent.Render(content)
+}
+
+func snakeToCamel(s string) string {
+	parts := strings.Split(s, "_")
+	for i, p := range parts {
+		if len(p) > 0 {
+			parts[i] = strings.ToUpper(p[:1]) + p[1:]
+		}
+	}
+	return strings.Join(parts, "")
 }

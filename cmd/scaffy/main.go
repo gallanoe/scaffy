@@ -6,7 +6,6 @@ import (
 	"os"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/joho/godotenv"
 
 	"github.com/gallanoe/scaffy/internal/config"
 	"github.com/gallanoe/scaffy/internal/conversation"
@@ -20,9 +19,6 @@ func main() {
 }
 
 func run() int {
-	// Load .env (ignore error if missing)
-	_ = godotenv.Load()
-
 	// Init logging to file
 	logFile, err := os.Create("scaffy.log")
 	if err != nil {
@@ -48,10 +44,28 @@ func run() int {
 		cfg.Temperature,
 	)
 
-	// Create tool registry
+	// Map of all available tools
+	allTools := map[string]tools.ToolHandler{
+		"echo":           &tools.EchoTool{},
+		"read_file":      &tools.ReadFileTool{},
+		"write_file":     &tools.WriteFileTool{},
+		"edit_file":      &tools.EditFileTool{},
+		"list_directory":  &tools.ListDirectoryTool{},
+		"search_files":   &tools.SearchFilesTool{},
+		"grep_search":    &tools.GrepSearchTool{},
+		"bash_exec":      tools.NewBashExecTool(cfg.BashTimeout),
+		"web_fetch":      &tools.WebFetchTool{},
+		"web_search":     tools.NewWebSearchTool(cfg.BraveAPIKey),
+	}
+
+	// Register only tools listed in config
 	registry := tools.NewRegistry()
-	if cfg.EchoTool {
-		registry.Register(&tools.EchoTool{})
+	for _, name := range cfg.Tools {
+		if handler, ok := allTools[name]; ok {
+			registry.Register(handler)
+		} else {
+			slog.Warn("unknown tool in config, skipping", "tool", name)
+		}
 	}
 
 	// Create conversation and add system prompt
