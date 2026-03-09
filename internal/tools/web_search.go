@@ -80,11 +80,11 @@ func (t *WebSearchTool) Execute(ctx context.Context, args json.RawMessage) (stri
 	if err != nil {
 		return "", fmt.Errorf("search request failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
-		return "", fmt.Errorf("Brave API error %d: %s", resp.StatusCode, string(body))
+		return "", fmt.Errorf("brave API error %d: %s", resp.StatusCode, string(body))
 	}
 
 	body, err := io.ReadAll(io.LimitReader(resp.Body, maxFetchBytes))

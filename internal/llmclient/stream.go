@@ -2,6 +2,7 @@ package llmclient
 
 import (
 	"encoding/json"
+	"sort"
 
 	openai "github.com/sashabaranov/go-openai"
 
@@ -89,10 +90,18 @@ func (a *ToolCallAccumulator) ProcessDelta(chunk openai.ToolCall) (StreamMsg, bo
 	return StreamMsg{}, false
 }
 
-// Finalize returns all accumulated tool calls as completed ToolCall values.
+// Finalize returns all accumulated tool calls as completed ToolCall values,
+// sorted by their stream index for deterministic ordering.
 func (a *ToolCallAccumulator) Finalize() []conversation.ToolCall {
+	indices := make([]int, 0, len(a.Calls))
+	for idx := range a.Calls {
+		indices = append(indices, idx)
+	}
+	sort.Ints(indices)
+
 	calls := make([]conversation.ToolCall, 0, len(a.Calls))
-	for _, p := range a.Calls {
+	for _, idx := range indices {
+		p := a.Calls[idx]
 		args := json.RawMessage(p.Arguments)
 		if !json.Valid(args) {
 			quoted, _ := json.Marshal(p.Arguments)

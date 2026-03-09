@@ -53,7 +53,7 @@ func (t *BashExecTool) Execute(ctx context.Context, args json.RawMessage) (strin
 	ctx, cancel := context.WithTimeout(ctx, t.timeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, "sh", "-c", a.Command)
+	cmd := exec.CommandContext(ctx, "sh", "-c", a.Command) //#nosec G204 -- command execution is the tool's purpose
 	output, err := cmd.CombinedOutput()
 
 	result := string(output)

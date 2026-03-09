@@ -115,11 +115,11 @@ func (t *GrepSearchTool) Execute(_ context.Context, args json.RawMessage) (strin
 }
 
 func grepFile(path string, re *regexp.Regexp) ([]string, error) {
-	f, err := os.Open(path)
+	f, err := os.Open(path) //#nosec G304 -- path comes from LLM tool call, intentional
 	if err != nil {
 		return nil, err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	var matches []string
 	scanner := bufio.NewScanner(f)

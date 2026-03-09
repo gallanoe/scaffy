@@ -89,8 +89,10 @@ func (m Model) handleInputKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case tea.KeyTab:
 		m.focus = FocusHistory
 		if !m.conversation.IsEmpty() && m.selectedMessage == nil {
-			idx := m.conversation.Len() - 1
-			m.selectedMessage = &idx
+			idx := nextVisibleMessage(m.conversation, m.conversation.Len()-1, -1)
+			if idx >= 0 {
+				m.selectedMessage = &idx
+			}
 		}
 		return m, nil
 
@@ -116,15 +118,19 @@ func (m Model) handleHistoryKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case tea.KeyUp:
 		if m.selectedMessage != nil && *m.selectedMessage > 0 {
-			idx := *m.selectedMessage - 1
-			m.selectedMessage = &idx
+			idx := nextVisibleMessage(m.conversation, *m.selectedMessage-1, -1)
+			if idx >= 0 {
+				m.selectedMessage = &idx
+			}
 		}
 		return m, nil
 
 	case tea.KeyDown:
 		if m.selectedMessage != nil && *m.selectedMessage+1 < m.conversation.Len() {
-			idx := *m.selectedMessage + 1
-			m.selectedMessage = &idx
+			idx := nextVisibleMessage(m.conversation, *m.selectedMessage+1, 1)
+			if idx >= 0 && idx < m.conversation.Len() {
+				m.selectedMessage = &idx
+			}
 		}
 		return m, nil
 
@@ -171,7 +177,7 @@ func (m Model) handleWindowSize(msg tea.WindowSizeMsg) (tea.Model, tea.Cmd) {
 	m.width = msg.Width
 	m.height = msg.Height
 
-	headerHeight := 1
+	headerHeight := 0
 	inputHeight := 5
 	statusBarHeight := 1
 	vpHeight := m.height - inputHeight - headerHeight - statusBarHeight
@@ -209,18 +215,32 @@ func (m Model) handleStreamTick(msg StreamTickMsg) (tea.Model, tea.Cmd) {
 	case llmclient.StreamMsgToolCallComplete:
 		m.finalizePartialContent()
 		if event.ToolCall != nil {
-			calls := []conversation.ToolCall{*event.ToolCall}
-			m.conversation.Push(conversation.NewAssistantToolCallsMessage(calls))
-			call := *event.ToolCall
-			gen := m.streamGeneration
-			registry := m.toolRegistry
-			cmd := executeToolCmd(registry, call, gen)
-			return m, tea.Batch(cmd, waitForStream(m.streamChan, m.streamGeneration))
+			m.accumulatedToolCalls = append(m.accumulatedToolCalls, *event.ToolCall)
 		}
 		return m, waitForStream(m.streamChan, m.streamGeneration)
 
 	case llmclient.StreamMsgDone:
 		m.finalizePartialContent()
+		if len(m.accumulatedToolCalls) > 0 {
+			// Push one assistant message with all tool calls
+			m.conversation.Push(conversation.NewAssistantToolCallsMessage(m.accumulatedToolCalls))
+
+			// Populate pending set and fire parallel executions
+			m.pendingToolCalls = make(map[string]bool)
+			cmds := make([]tea.Cmd, 0, len(m.accumulatedToolCalls)+1)
+			gen := m.streamGeneration
+			registry := m.toolRegistry
+			for _, call := range m.accumulatedToolCalls {
+				m.pendingToolCalls[call.ID] = true
+				cmds = append(cmds, executeToolCmd(registry, call, gen))
+			}
+			cmds = append(cmds, m.spinner.Tick)
+
+			m.streamingState = StateToolsExecuting
+			m.accumulatedToolCalls = nil
+			m.streamChan = nil
+			return m, tea.Batch(cmds...)
+		}
 		m.streamingState = StateIdle
 		m.streamChan = nil
 		return m, nil
@@ -241,6 +261,10 @@ func (m Model) handleStreamDone(msg StreamDoneMsg) (tea.Model, tea.Cmd) {
 	if msg.Generation != m.streamGeneration {
 		return m, nil
 	}
+	// Don't reset to idle if we're waiting for tool results
+	if m.streamingState == StateToolsExecuting {
+		return m, nil
+	}
 	m.finalizePartialContent()
 	m.streamingState = StateIdle
 	m.streamChan = nil
@@ -252,14 +276,22 @@ func (m Model) handleToolResult(msg ToolResultMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
+	// Push result to conversation (errors become result content)
+	content := msg.Content
 	if msg.Error != "" {
-		m.streamingState = StateError
-		m.errorMessage = "Tool error: " + msg.Error
+		content = "Error: " + msg.Error
+	}
+	m.conversation.Push(conversation.NewToolResultMessage(msg.ToolCallID, content))
+
+	// Remove from pending set
+	delete(m.pendingToolCalls, msg.ToolCallID)
+
+	// If calls still pending, wait
+	if len(m.pendingToolCalls) > 0 {
 		return m, nil
 	}
 
-	m.conversation.Push(conversation.NewToolResultMessage(msg.ToolCallID, msg.Content))
-
+	// All resolved — start new LLM stream
 	m.streamGeneration++
 	m.streamingState = StateStreaming
 	m.partialContent = ""
@@ -284,6 +316,8 @@ func (m Model) sendMessage() (tea.Model, tea.Cmd) {
 	m.streamGeneration++
 	m.streamingState = StateStreaming
 	m.partialContent = ""
+	m.accumulatedToolCalls = nil
+	m.pendingToolCalls = make(map[string]bool)
 
 	cmd := m.startStream()
 	return m, tea.Batch(cmd, m.spinner.Tick)
@@ -325,6 +359,17 @@ func waitForStream(ch <-chan llmclient.StreamMsg, gen uint64) tea.Cmd {
 		}
 		return StreamTickMsg{Generation: gen, Event: event}
 	}
+}
+
+// nextVisibleMessage finds the next message index from `from` in the given
+// direction (1 or -1) that is not a RoleTool message. Returns -1 if none found.
+func nextVisibleMessage(conv *conversation.Conversation, from, direction int) int {
+	for i := from; i >= 0 && i < conv.Len(); i += direction {
+		if conv.Messages[i].Role != conversation.RoleTool {
+			return i
+		}
+	}
+	return -1
 }
 
 func executeToolCmd(registry *tools.ToolRegistry, call conversation.ToolCall, gen uint64) tea.Cmd {

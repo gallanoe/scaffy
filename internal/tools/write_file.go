@@ -44,11 +44,11 @@ func (t *WriteFileTool) Execute(_ context.Context, args json.RawMessage) (string
 		return "", fmt.Errorf("invalid arguments: %w", err)
 	}
 
-	if err := os.MkdirAll(filepath.Dir(a.Path), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(a.Path), 0o750); err != nil {
 		return "", fmt.Errorf("failed to create directories: %w", err)
 	}
 
-	if err := os.WriteFile(a.Path, []byte(a.Content), 0o644); err != nil {
+	if err := os.WriteFile(a.Path, []byte(a.Content), 0o600); err != nil {
 		return "", fmt.Errorf("failed to write file: %w", err)
 	}
 

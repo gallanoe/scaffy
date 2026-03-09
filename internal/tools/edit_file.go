@@ -66,7 +66,7 @@ func (t *EditFileTool) Execute(_ context.Context, args json.RawMessage) (string,
 	}
 
 	newContent := strings.Replace(content, a.OldString, a.NewString, 1)
-	if err := os.WriteFile(a.Path, []byte(newContent), 0o644); err != nil {
+	if err := os.WriteFile(a.Path, []byte(newContent), 0o600); err != nil { //#nosec G703 -- path comes from LLM tool call, intentional
 		return "", fmt.Errorf("failed to write file: %w", err)
 	}
 

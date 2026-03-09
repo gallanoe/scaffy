@@ -50,7 +50,7 @@ func run() int {
 		"read_file":      &tools.ReadFileTool{},
 		"write_file":     &tools.WriteFileTool{},
 		"edit_file":      &tools.EditFileTool{},
-		"list_directory":  &tools.ListDirectoryTool{},
+		"list_directory": &tools.ListDirectoryTool{},
 		"search_files":   &tools.SearchFilesTool{},
 		"grep_search":    &tools.GrepSearchTool{},
 		"bash_exec":      tools.NewBashExecTool(cfg.BashTimeout),

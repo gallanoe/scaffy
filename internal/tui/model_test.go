@@ -148,6 +148,13 @@ func TestViewRendersToolCalls(t *testing.T) {
 
 func TestViewRendersToolResults(t *testing.T) {
 	m := newTestModel()
+	// Push assistant tool call first, then result — result renders inline
+	calls := []conversation.ToolCall{{
+		ID:        "call_1",
+		Name:      "echo",
+		Arguments: json.RawMessage(`{"message":"hi"}`),
+	}}
+	m.conversation.Push(conversation.NewAssistantToolCallsMessage(calls))
 	m.conversation.Push(conversation.NewToolResultMessage("call_1", "echo result"))
 
 	view := m.View()
@@ -157,6 +164,9 @@ func TestViewRendersToolResults(t *testing.T) {
 	}
 	if !containsString(view, "echo result") {
 		t.Error("expected tool result content in view")
+	}
+	if !containsString(view, "└─") {
+		t.Error("expected L-connector in inline result")
 	}
 }
 
@@ -213,17 +223,18 @@ func TestGenerationFiltering(t *testing.T) {
 
 func TestHistoryNavigation(t *testing.T) {
 	m := newTestModel()
-	m.conversation.Push(conversation.NewUserMessage("first"))
-	m.conversation.Push(conversation.NewAssistantMessage("second"))
-	m.conversation.Push(conversation.NewUserMessage("third"))
+	m.conversation.Push(conversation.NewUserMessage("first"))                  // idx 0
+	m.conversation.Push(conversation.NewAssistantMessage("second"))            // idx 1
+	m.conversation.Push(conversation.NewToolResultMessage("call_x", "result")) // idx 2 (RoleTool — skipped)
+	m.conversation.Push(conversation.NewUserMessage("third"))                  // idx 3
 
-	// Switch to history
+	// Switch to history — should land on idx 3 (skipping tool at idx 2)
 	m = updateModel(m, tea.KeyMsg{Type: tea.KeyTab})
-	if m.selectedMessage == nil || *m.selectedMessage != 2 {
-		t.Fatal("expected selection at last message (idx 2)")
+	if m.selectedMessage == nil || *m.selectedMessage != 3 {
+		t.Fatalf("expected selection at idx 3, got %v", m.selectedMessage)
 	}
 
-	// Navigate up
+	// Navigate up — should skip idx 2 (tool) and land on idx 1
 	m = updateModel(m, tea.KeyMsg{Type: tea.KeyUp})
 	if *m.selectedMessage != 1 {
 		t.Errorf("expected selection at idx 1, got %d", *m.selectedMessage)
@@ -241,10 +252,15 @@ func TestHistoryNavigation(t *testing.T) {
 		t.Errorf("expected selection to stay at 0, got %d", *m.selectedMessage)
 	}
 
-	// Navigate down
+	// Navigate down — should skip idx 2 (tool) from idx 1
 	m = updateModel(m, tea.KeyMsg{Type: tea.KeyDown})
 	if *m.selectedMessage != 1 {
 		t.Errorf("expected selection at idx 1, got %d", *m.selectedMessage)
+	}
+
+	m = updateModel(m, tea.KeyMsg{Type: tea.KeyDown})
+	if *m.selectedMessage != 3 {
+		t.Errorf("expected selection at idx 3 (skipping tool at 2), got %d", *m.selectedMessage)
 	}
 }
 
@@ -274,18 +290,6 @@ func TestToggleExpandToolBlock(t *testing.T) {
 	m = updateModel(m, tea.KeyMsg{Type: tea.KeyEnter})
 	if m.expandedBlocks[msgID] {
 		t.Error("expected block to be collapsed")
-	}
-}
-
-func TestViewHeader(t *testing.T) {
-	m := newTestModel()
-	view := m.View()
-
-	if !containsString(view, "scaffy") {
-		t.Error("expected 'scaffy' in header")
-	}
-	if !containsString(view, "test-model") {
-		t.Error("expected model name in header")
 	}
 }
 
@@ -368,4 +372,100 @@ func stripANSI(s string) string {
 func containsString(s, substr string) bool {
 	plain := stripANSI(s)
 	return strings.Contains(plain, substr)
+}
+
+func TestParallelToolResults(t *testing.T) {
+	m := newTestModel()
+	m.streamGeneration = 1
+	m.streamingState = StateToolsExecuting
+	m.pendingToolCalls = map[string]bool{"call_a": true, "call_b": true}
+
+	calls := []conversation.ToolCall{
+		{ID: "call_a", Name: "echo", Arguments: json.RawMessage(`{"msg":"a"}`)},
+		{ID: "call_b", Name: "echo", Arguments: json.RawMessage(`{"msg":"b"}`)},
+	}
+	m.conversation.Push(conversation.NewAssistantToolCallsMessage(calls))
+
+	// First result arrives — should stay in StateToolsExecuting
+	m = updateModel(m, ToolResultMsg{Generation: 1, ToolCallID: "call_a", Content: "result a"})
+	if m.streamingState != StateToolsExecuting {
+		t.Errorf("expected StateToolsExecuting after first result, got %d", m.streamingState)
+	}
+	if len(m.pendingToolCalls) != 1 {
+		t.Errorf("expected 1 pending call, got %d", len(m.pendingToolCalls))
+	}
+
+	// Second result arrives — should transition to StateStreaming
+	m = updateModel(m, ToolResultMsg{Generation: 1, ToolCallID: "call_b", Content: "result b"})
+	if m.streamingState != StateStreaming {
+		t.Errorf("expected StateStreaming after all results, got %d", m.streamingState)
+	}
+	if len(m.pendingToolCalls) != 0 {
+		t.Errorf("expected 0 pending calls, got %d", len(m.pendingToolCalls))
+	}
+}
+
+func TestToolCallAccumulation(t *testing.T) {
+	m := newTestModel()
+	m.streamGeneration = 1
+	m.streamingState = StateStreaming
+	ch := make(chan llmclient.StreamMsg, 3)
+	m.streamChan = ch
+
+	call1 := conversation.ToolCall{ID: "call_1", Name: "echo", Arguments: json.RawMessage(`{}`)}
+	call2 := conversation.ToolCall{ID: "call_2", Name: "echo", Arguments: json.RawMessage(`{}`)}
+
+	// First tool call complete — should accumulate, not push to conversation
+	m = updateModel(m, StreamTickMsg{
+		Generation: 1,
+		Event:      llmclient.StreamMsg{Type: llmclient.StreamMsgToolCallComplete, ToolCall: &call1},
+	})
+	if m.conversation.Len() != 0 {
+		t.Error("expected no messages pushed during accumulation")
+	}
+	if len(m.accumulatedToolCalls) != 1 {
+		t.Errorf("expected 1 accumulated call, got %d", len(m.accumulatedToolCalls))
+	}
+
+	// Second tool call complete
+	m = updateModel(m, StreamTickMsg{
+		Generation: 1,
+		Event:      llmclient.StreamMsg{Type: llmclient.StreamMsgToolCallComplete, ToolCall: &call2},
+	})
+	if len(m.accumulatedToolCalls) != 2 {
+		t.Errorf("expected 2 accumulated calls, got %d", len(m.accumulatedToolCalls))
+	}
+}
+
+func TestToolErrorPushedAsResult(t *testing.T) {
+	m := newTestModel()
+	m.streamGeneration = 1
+	m.streamingState = StateToolsExecuting
+	m.pendingToolCalls = map[string]bool{"call_err": true}
+
+	calls := []conversation.ToolCall{
+		{ID: "call_err", Name: "bash_exec", Arguments: json.RawMessage(`{"command":"fail"}`)},
+	}
+	m.conversation.Push(conversation.NewAssistantToolCallsMessage(calls))
+
+	// Tool error should become a result, not set StateError
+	m = updateModel(m, ToolResultMsg{Generation: 1, ToolCallID: "call_err", Error: "command failed"})
+
+	if m.streamingState == StateError {
+		t.Error("tool error should not set StateError")
+	}
+
+	// Should have pushed a tool result message
+	found := false
+	for _, msg := range m.conversation.Messages {
+		if msg.Role == conversation.RoleTool && msg.ToolResult != nil && msg.ToolResult.ToolCallID == "call_err" {
+			if msg.ToolResult.Content != "Error: command failed" {
+				t.Errorf("expected error content, got %q", msg.ToolResult.Content)
+			}
+			found = true
+		}
+	}
+	if !found {
+		t.Error("expected tool result message for error")
+	}
 }

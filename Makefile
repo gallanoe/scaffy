@@ -1,4 +1,6 @@
-.PHONY: build test lint run clean vet
+.PHONY: all build test lint run clean vet
+
+all: lint test build
 
 build:
 	go build -o scaffy ./cmd/scaffy

@@ -56,6 +56,17 @@ func Load() (*Config, error) {
 	}
 
 	// Env var overrides
+	applyEnvOverrides(cfg)
+
+	// Validate required fields
+	if cfg.APIKey == "" {
+		return nil, fmt.Errorf("api_key must be set in scaffy.yaml or OPENROUTER_API_KEY environment variable")
+	}
+
+	return cfg, nil
+}
+
+func applyEnvOverrides(cfg *Config) {
 	if v := os.Getenv("OPENROUTER_API_KEY"); v != "" {
 		cfg.APIKey = v
 	}
@@ -81,11 +92,4 @@ func Load() (*Config, error) {
 	if v := os.Getenv("BRAVE_API_KEY"); v != "" {
 		cfg.BraveAPIKey = v
 	}
-
-	// Validate required fields
-	if cfg.APIKey == "" {
-		return nil, fmt.Errorf("api_key must be set in scaffy.yaml or OPENROUTER_API_KEY environment variable")
-	}
-
-	return cfg, nil
 }

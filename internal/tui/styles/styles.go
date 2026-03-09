@@ -122,7 +122,7 @@ func NewStyles() *Styles {
 			Base:       lipgloss.NewStyle().Background(BgLighter).Padding(0, 1),
 			ErrorLabel: lipgloss.NewStyle().Foreground(StatusError).Bold(true),
 			ErrorText:  lipgloss.NewStyle().Foreground(StatusError),
-			HintKey:    lipgloss.NewStyle().Foreground(FgMuted).Bold(true),
+			HintKey:    lipgloss.NewStyle().Foreground(FgHalfMuted),
 			HintDesc:   lipgloss.NewStyle().Foreground(FgHalfMuted),
 		},
 		Spinner:  lipgloss.NewStyle().Foreground(Primary),

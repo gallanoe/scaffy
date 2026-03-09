@@ -52,11 +52,12 @@ func TestLoadDefaults(t *testing.T) {
 	}
 }
 
-func TestLoadFromYAML(t *testing.T) {
+func loadYAMLConfig(t *testing.T) *Config {
+	t.Helper()
 	clearEnv(t)
 
 	dir := t.TempDir()
-	yaml := `api_key: "sk-yaml-key"
+	yamlContent := `api_key: "sk-yaml-key"
 base_url: "https://custom.api/v1"
 model: "gpt-4"
 max_tokens: 8192
@@ -69,11 +70,10 @@ tools:
   - read_file
   - bash_exec
 `
-	if err := os.WriteFile(filepath.Join(dir, "scaffy.yaml"), []byte(yaml), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "scaffy.yaml"), []byte(yamlContent), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
-	// chdir to temp dir so Load() finds scaffy.yaml
 	origDir, _ := os.Getwd()
 	if err := os.Chdir(dir); err != nil {
 		t.Fatal(err)
@@ -84,34 +84,44 @@ tools:
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
+	return cfg
+}
 
-	if cfg.APIKey != "sk-yaml-key" {
-		t.Errorf("expected api key from YAML, got %q", cfg.APIKey)
-	}
-	if cfg.BaseURL != "https://custom.api/v1" {
-		t.Errorf("expected custom base URL, got %q", cfg.BaseURL)
-	}
-	if cfg.Model != "gpt-4" {
-		t.Errorf("expected model 'gpt-4', got %q", cfg.Model)
-	}
-	if cfg.MaxTokens != 8192 {
-		t.Errorf("expected max tokens 8192, got %d", cfg.MaxTokens)
-	}
-	if cfg.Temperature != 0.5 {
-		t.Errorf("expected temperature 0.5, got %f", cfg.Temperature)
-	}
-	if cfg.SystemPrompt != "You are helpful." {
-		t.Errorf("expected system prompt, got %q", cfg.SystemPrompt)
-	}
-	if cfg.BashTimeout != 60 {
-		t.Errorf("expected bash timeout 60, got %d", cfg.BashTimeout)
-	}
-	if cfg.BraveAPIKey != "BSA-yaml" {
-		t.Errorf("expected brave api key, got %q", cfg.BraveAPIKey)
-	}
-	if len(cfg.Tools) != 3 || cfg.Tools[0] != "echo" || cfg.Tools[1] != "read_file" || cfg.Tools[2] != "bash_exec" {
-		t.Errorf("expected 3 tools, got %v", cfg.Tools)
-	}
+func TestLoadFromYAML(t *testing.T) {
+	cfg := loadYAMLConfig(t)
+
+	t.Run("basic fields", func(t *testing.T) {
+		if cfg.APIKey != "sk-yaml-key" {
+			t.Errorf("expected api key from YAML, got %q", cfg.APIKey)
+		}
+		if cfg.BaseURL != "https://custom.api/v1" {
+			t.Errorf("expected custom base URL, got %q", cfg.BaseURL)
+		}
+		if cfg.Model != "gpt-4" {
+			t.Errorf("expected model 'gpt-4', got %q", cfg.Model)
+		}
+		if cfg.MaxTokens != 8192 {
+			t.Errorf("expected max tokens 8192, got %d", cfg.MaxTokens)
+		}
+		if cfg.Temperature != 0.5 {
+			t.Errorf("expected temperature 0.5, got %f", cfg.Temperature)
+		}
+	})
+
+	t.Run("extended fields", func(t *testing.T) {
+		if cfg.SystemPrompt != "You are helpful." {
+			t.Errorf("expected system prompt, got %q", cfg.SystemPrompt)
+		}
+		if cfg.BashTimeout != 60 {
+			t.Errorf("expected bash timeout 60, got %d", cfg.BashTimeout)
+		}
+		if cfg.BraveAPIKey != "BSA-yaml" {
+			t.Errorf("expected brave api key, got %q", cfg.BraveAPIKey)
+		}
+		if len(cfg.Tools) != 3 || cfg.Tools[0] != "echo" || cfg.Tools[1] != "read_file" || cfg.Tools[2] != "bash_exec" {
+			t.Errorf("expected 3 tools, got %v", cfg.Tools)
+		}
+	})
 }
 
 func TestEnvOverridesYAML(t *testing.T) {
@@ -121,7 +131,7 @@ func TestEnvOverridesYAML(t *testing.T) {
 	yaml := `api_key: "sk-yaml-key"
 model: "yaml-model"
 `
-	if err := os.WriteFile(filepath.Join(dir, "scaffy.yaml"), []byte(yaml), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "scaffy.yaml"), []byte(yaml), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -198,7 +208,7 @@ func TestLoadInvalidYAML(t *testing.T) {
 	clearEnv(t)
 
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "scaffy.yaml"), []byte("{{invalid yaml"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "scaffy.yaml"), []byte("{{invalid yaml"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 

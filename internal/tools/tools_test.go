@@ -122,7 +122,9 @@ func TestRegistryIsEmpty(t *testing.T) {
 func TestReadFileTool(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "test.txt")
-	os.WriteFile(path, []byte("line1\nline2\nline3\nline4\nline5\n"), 0o644)
+	if err := os.WriteFile(path, []byte("line1\nline2\nline3\nline4\nline5\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 
 	tool := &ReadFileTool{}
 
@@ -176,7 +178,10 @@ func TestWriteFileTool(t *testing.T) {
 		if !strings.Contains(result, "11 bytes") {
 			t.Errorf("expected byte count in result, got %q", result)
 		}
-		data, _ := os.ReadFile(path)
+		data, err := os.ReadFile(path) //#nosec G304 -- test file
+		if err != nil {
+			t.Fatal(err)
+		}
 		if string(data) != "hello world" {
 			t.Errorf("file content mismatch: %q", string(data))
 		}
@@ -189,7 +194,10 @@ func TestWriteFileTool(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		data, _ := os.ReadFile(path)
+		data, err := os.ReadFile(path) //#nosec G304 -- test file
+		if err != nil {
+			t.Fatal(err)
+		}
 		if string(data) != "nested" {
 			t.Errorf("file content mismatch: %q", string(data))
 		}
@@ -204,14 +212,19 @@ func TestEditFileTool(t *testing.T) {
 	t.Run("successful edit", func(t *testing.T) {
 		dir := t.TempDir()
 		path := filepath.Join(dir, "edit.txt")
-		os.WriteFile(path, []byte("hello world"), 0o644)
+		if err := os.WriteFile(path, []byte("hello world"), 0o600); err != nil {
+			t.Fatal(err)
+		}
 
 		args := json.RawMessage(fmt.Sprintf(`{"path":%q,"old_string":"hello","new_string":"goodbye"}`, path))
 		_, err := tool.Execute(context.Background(), args)
 		if err != nil {
 			t.Fatal(err)
 		}
-		data, _ := os.ReadFile(path)
+		data, err := os.ReadFile(path) //#nosec G304 -- test file
+		if err != nil {
+			t.Fatal(err)
+		}
 		if string(data) != "goodbye world" {
 			t.Errorf("expected 'goodbye world', got %q", string(data))
 		}
@@ -220,7 +233,9 @@ func TestEditFileTool(t *testing.T) {
 	t.Run("string not found", func(t *testing.T) {
 		dir := t.TempDir()
 		path := filepath.Join(dir, "edit.txt")
-		os.WriteFile(path, []byte("hello world"), 0o644)
+		if err := os.WriteFile(path, []byte("hello world"), 0o600); err != nil {
+			t.Fatal(err)
+		}
 
 		args := json.RawMessage(fmt.Sprintf(`{"path":%q,"old_string":"missing","new_string":"x"}`, path))
 		_, err := tool.Execute(context.Background(), args)
@@ -235,7 +250,9 @@ func TestEditFileTool(t *testing.T) {
 	t.Run("multiple matches", func(t *testing.T) {
 		dir := t.TempDir()
 		path := filepath.Join(dir, "edit.txt")
-		os.WriteFile(path, []byte("aaa"), 0o644)
+		if err := os.WriteFile(path, []byte("aaa"), 0o600); err != nil {
+			t.Fatal(err)
+		}
 
 		args := json.RawMessage(fmt.Sprintf(`{"path":%q,"old_string":"a","new_string":"b"}`, path))
 		_, err := tool.Execute(context.Background(), args)
@@ -260,8 +277,12 @@ func TestEditFileTool(t *testing.T) {
 
 func TestListDirectoryTool(t *testing.T) {
 	dir := t.TempDir()
-	os.WriteFile(filepath.Join(dir, "file.txt"), []byte("x"), 0o644)
-	os.Mkdir(filepath.Join(dir, "subdir"), 0o755)
+	if err := os.WriteFile(filepath.Join(dir, "file.txt"), []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(dir, "subdir"), 0o750); err != nil {
+		t.Fatal(err)
+	}
 
 	tool := &ListDirectoryTool{}
 
@@ -292,8 +313,12 @@ func TestListDirectoryTool(t *testing.T) {
 
 func TestSearchFilesTool(t *testing.T) {
 	dir := t.TempDir()
-	os.WriteFile(filepath.Join(dir, "main.go"), []byte("package main"), 0o644)
-	os.WriteFile(filepath.Join(dir, "readme.md"), []byte("# readme"), 0o644)
+	if err := os.WriteFile(filepath.Join(dir, "main.go"), []byte("package main"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "readme.md"), []byte("# readme"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 
 	tool := &SearchFilesTool{}
 
@@ -335,8 +360,12 @@ func TestSearchFilesTool(t *testing.T) {
 
 func TestGrepSearchTool(t *testing.T) {
 	dir := t.TempDir()
-	os.WriteFile(filepath.Join(dir, "main.go"), []byte("package main\nfunc main() {}\n"), 0o644)
-	os.WriteFile(filepath.Join(dir, "util.go"), []byte("package util\nfunc helper() {}\n"), 0o644)
+	if err := os.WriteFile(filepath.Join(dir, "main.go"), []byte("package main\nfunc main() {}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "util.go"), []byte("package util\nfunc helper() {}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 
 	tool := &GrepSearchTool{}
 
@@ -434,8 +463,8 @@ func TestWebFetchTool(t *testing.T) {
 	tool := &WebFetchTool{}
 
 	t.Run("successful fetch", func(t *testing.T) {
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			fmt.Fprint(w, "hello from server")
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			_, _ = fmt.Fprint(w, "hello from server")
 		}))
 		defer server.Close()
 
@@ -490,7 +519,7 @@ func TestWebSearchTool(t *testing.T) {
 				return
 			}
 			w.Header().Set("Content-Type", "application/json")
-			fmt.Fprint(w, `{"web":{"results":[{"title":"Test Result","url":"https://example.com","description":"A test result"}]}}`)
+			_, _ = fmt.Fprint(w, `{"web":{"results":[{"title":"Test Result","url":"https://example.com","description":"A test result"}]}}`)
 		}))
 		defer server.Close()
 

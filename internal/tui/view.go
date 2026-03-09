@@ -10,17 +10,28 @@ import (
 	"github.com/gallanoe/scaffy/internal/conversation"
 )
 
+// humanBytes formats a byte count as a human-readable string.
+func humanBytes(b int) string {
+	switch {
+	case b >= 1024*1024:
+		return fmt.Sprintf("%.1f MB", float64(b)/(1024*1024))
+	case b >= 1024:
+		return fmt.Sprintf("%.1f KB", float64(b)/1024)
+	default:
+		return fmt.Sprintf("%d B", b)
+	}
+}
+
 func (m Model) View() string {
 	if m.quitting {
 		return ""
 	}
 
-	header := m.renderHeader()
 	messageHistory := m.renderMessageHistory()
 	input := m.renderInputArea()
 	statusBar := m.renderStatusBar()
 
-	return lipgloss.JoinVertical(lipgloss.Left, header, messageHistory, input, statusBar)
+	return lipgloss.JoinVertical(lipgloss.Left, messageHistory, input, statusBar)
 }
 
 func (m Model) contentWidth() int {
@@ -32,15 +43,6 @@ func (m Model) contentWidth() int {
 		w = 20
 	}
 	return w
-}
-
-func (m Model) renderHeader() string {
-	appName := m.styles.Header.AppName.Render("scaffy")
-	sep := m.styles.Text.Subtle.Render(" · ")
-	modelName := m.styles.Header.ModelName.Render(m.modelName)
-
-	content := appName + sep + modelName
-	return m.styles.Header.Bar.Width(m.width).Render(content)
 }
 
 func (m Model) renderStatusBar() string {
@@ -65,6 +67,11 @@ func (m Model) renderMessageHistory() string {
 	cw := m.contentWidth()
 
 	for idx, msg := range m.conversation.Messages {
+		// Tool result messages are rendered inline with their parent tool call
+		if msg.Role == conversation.RoleTool {
+			continue
+		}
+
 		isSelected := m.focus == FocusHistory && m.selectedMessage != nil && *m.selectedMessage == idx
 		expanded := m.expandedBlocks[msg.Metadata.ID]
 
@@ -75,13 +82,18 @@ func (m Model) renderMessageHistory() string {
 			lines = append(lines, m.renderUserMsg(msg, isSelected))
 		case conversation.RoleAssistant:
 			lines = append(lines, m.renderAssistantMsg(msg, isSelected, expanded, cw)...)
-		case conversation.RoleTool:
-			if line, ok := m.renderToolMsg(msg, isSelected, expanded); ok {
-				lines = append(lines, line)
-			}
 		}
 
 		lines = append(lines, "")
+	}
+
+	// Tool execution spinner
+	if m.streamingState == StateToolsExecuting {
+		n := len(m.pendingToolCalls)
+		label := fmt.Sprintf(" Executing %d tool(s)...", n)
+		spinnerLine := m.spinner.View() + m.styles.Text.Muted.Render(label)
+		spinnerLine = m.addBorderPerLine(spinnerLine, m.styles.Message.AssistantBorder)
+		lines = append(lines, spinnerLine)
 	}
 
 	// Streaming content + spinner
@@ -142,6 +154,16 @@ func (m Model) renderAssistantMsg(msg conversation.ChatMessage, isSelected, expa
 				line = m.styles.Message.SelectedBg.Render(line)
 			}
 			lines = append(lines, line)
+
+			// Inline result with L-connector
+			if result := m.findToolResult(call.ID); result != nil {
+				resultDisplay := m.formatToolResult(*result, expanded)
+				resultLine := m.addBorderPerLine("   └─ "+resultDisplay, m.styles.Message.AssistantBorder)
+				if isSelected {
+					resultLine = m.styles.Message.SelectedBg.Render(resultLine)
+				}
+				lines = append(lines, resultLine)
+			}
 		}
 	} else {
 		rendered := m.mdCache.GetOrRender(msg.Content, cw)
@@ -153,18 +175,6 @@ func (m Model) renderAssistantMsg(msg conversation.ChatMessage, isSelected, expa
 		lines = append(lines, rendered)
 	}
 	return lines
-}
-
-func (m Model) renderToolMsg(msg conversation.ChatMessage, isSelected, expanded bool) (string, bool) {
-	if msg.ToolResult == nil {
-		return "", false
-	}
-	display := m.formatToolResult(*msg.ToolResult, expanded)
-	line := m.addBorderPerLine(display, m.styles.Message.AssistantBorder)
-	if isSelected {
-		line = m.styles.Message.SelectedBg.Render(line)
-	}
-	return line, true
 }
 
 func (m Model) renderInputArea() string {
@@ -191,13 +201,24 @@ func (m Model) addBorderPerLine(text, border string) string {
 // toolStatusIcon returns the appropriate status icon for a tool call by
 // checking if a result exists for it in the conversation.
 func (m Model) toolStatusIcon(callID string) string {
-	for _, msg := range m.conversation.Messages {
-		if msg.Role == conversation.RoleTool && msg.ToolResult != nil && msg.ToolResult.ToolCallID == callID {
-			return m.styles.Tool.SuccessIcon
+	if r := m.findToolResult(callID); r != nil {
+		if strings.HasPrefix(r.Content, "Error: ") {
+			return m.styles.Tool.ErrorIcon
 		}
+		return m.styles.Tool.SuccessIcon
 	}
 	// Still pending (streaming or awaiting result)
 	return m.styles.Tool.PendingIcon
+}
+
+// findToolResult scans the conversation for a tool result matching the given call ID.
+func (m Model) findToolResult(callID string) *conversation.ToolResult {
+	for _, msg := range m.conversation.Messages {
+		if msg.Role == conversation.RoleTool && msg.ToolResult != nil && msg.ToolResult.ToolCallID == callID {
+			return msg.ToolResult
+		}
+	}
+	return nil
 }
 
 func (m Model) formatToolCall(call conversation.ToolCall, expanded bool) string {
@@ -225,7 +246,10 @@ func (m Model) formatToolResult(result conversation.ToolResult, expanded bool) s
 	}
 	content := result.Content
 	if len(content) > 80 {
-		content = content[:80] + "..."
+		lineCount := strings.Count(result.Content, "\n") + 1
+		sizeStr := humanBytes(len(result.Content))
+		summary := m.styles.Text.HalfMuted.Render(fmt.Sprintf(" (%d lines, %s)", lineCount, sizeStr))
+		return label + m.styles.Tool.ResultContent.Render(content[:80]+"...") + summary
 	}
 	return label + m.styles.Tool.ResultContent.Render(content)
 }
