@@ -1,0 +1,4 @@
+/target
+.env
+scaffy.log
+.claude/settings.local.json
