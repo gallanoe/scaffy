@@ -11,7 +11,6 @@ linters:
     - unused
     - misspell
     - gocritic
-    - gosimple
   settings:
     gocyclo:
       min-complexity: 15
