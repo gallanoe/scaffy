@@ -18,9 +18,9 @@ var (
 	bgSubtle  = "#45475a"
 )
 
-func boolPtr(b bool) *bool       { return &b }
-func strPtr(s string) *string    { return &s }
-func uintPtr(u uint) *uint       { return &u }
+func boolPtr(b bool) *bool    { return &b }
+func strPtr(s string) *string { return &s }
+func uintPtr(u uint) *uint    { return &u }
 
 func customStyle() ansi.StyleConfig {
 	return ansi.StyleConfig{

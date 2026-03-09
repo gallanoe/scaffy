@@ -129,20 +129,7 @@ func (m Model) handleHistoryKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyEnter:
-		if m.selectedMessage != nil {
-			idx := *m.selectedMessage
-			if idx < len(m.conversation.Messages) {
-				msg := m.conversation.Messages[idx]
-				id := msg.Metadata.ID
-				if len(msg.ToolCalls) > 0 || msg.ToolResult != nil {
-					if m.expandedBlocks[id] {
-						delete(m.expandedBlocks, id)
-					} else {
-						m.expandedBlocks[id] = true
-					}
-				}
-			}
-		}
+		m.toggleSelectedExpand()
 		return m, nil
 
 	case tea.KeyTab:
@@ -158,6 +145,25 @@ func (m Model) handleHistoryKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	default:
 		return m, nil
+	}
+}
+
+func (m *Model) toggleSelectedExpand() {
+	if m.selectedMessage == nil {
+		return
+	}
+	idx := *m.selectedMessage
+	if idx >= len(m.conversation.Messages) {
+		return
+	}
+	msg := m.conversation.Messages[idx]
+	id := msg.Metadata.ID
+	if len(msg.ToolCalls) > 0 || msg.ToolResult != nil {
+		if m.expandedBlocks[id] {
+			delete(m.expandedBlocks, id)
+		} else {
+			m.expandedBlocks[id] = true
+		}
 	}
 }
 

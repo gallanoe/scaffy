@@ -13,10 +13,10 @@ var (
 	BgSubtle  = lipgloss.Color("#45475a")
 	BgOverlay = lipgloss.Color("#585b70")
 
-	FgBase     = lipgloss.Color("#cdd6f4")
-	FgMuted    = lipgloss.Color("#a6adc8")
+	FgBase      = lipgloss.Color("#cdd6f4")
+	FgMuted     = lipgloss.Color("#a6adc8")
 	FgHalfMuted = lipgloss.Color("#7f849c")
-	FgSubtle   = lipgloss.Color("#585b70")
+	FgSubtle    = lipgloss.Color("#585b70")
 
 	StatusError   = lipgloss.Color("#f38ba8")
 	StatusWarning = lipgloss.Color("#f9e2af")

@@ -1,7 +1,6 @@
 package tui
 
 import (
-	"github.com/gallanoe/scaffy/internal/conversation"
 	"github.com/gallanoe/scaffy/internal/llmclient"
 )
 
@@ -22,12 +21,6 @@ type ToolResultMsg struct {
 	ToolCallID string
 	Content    string
 	Error      string
-}
-
-// ToolCallInfo wraps a tool call for dispatching execution.
-type toolExecMsg struct {
-	Generation uint64
-	Call       conversation.ToolCall
 }
 
 // statusTimeoutMsg signals that a timed status message has expired.

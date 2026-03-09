@@ -70,51 +70,13 @@ func (m Model) renderMessageHistory() string {
 
 		switch msg.Role {
 		case conversation.RoleSystem:
-			line := m.styles.Message.SystemText.Render(fmt.Sprintf("System: %s", msg.Content))
-			if isSelected {
-				line = m.styles.Message.SelectedBg.Render(line)
-			}
-			lines = append(lines, line)
-
+			lines = append(lines, m.renderSystemMsg(msg, isSelected))
 		case conversation.RoleUser:
-			border := m.styles.Message.UserBorderBlurred
-			if isSelected {
-				border = m.styles.Message.UserBorderFocused
-			}
-			rendered := m.addBorderPerLine(msg.Content, border)
-			if isSelected {
-				rendered = m.styles.Message.SelectedBg.Render(rendered)
-			}
-			lines = append(lines, rendered)
-
+			lines = append(lines, m.renderUserMsg(msg, isSelected))
 		case conversation.RoleAssistant:
-			if len(msg.ToolCalls) > 0 {
-				for _, call := range msg.ToolCalls {
-					icon := m.toolStatusIcon(call.ID)
-					display := m.formatToolCall(call, expanded)
-					line := m.addBorderPerLine(icon+display, m.styles.Message.AssistantBorder)
-					if isSelected {
-						line = m.styles.Message.SelectedBg.Render(line)
-					}
-					lines = append(lines, line)
-				}
-			} else {
-				rendered := m.mdCache.GetOrRender(msg.Content, cw)
-				rendered = strings.TrimRight(rendered, "\n")
-				rendered = m.addBorderPerLine(rendered, m.styles.Message.AssistantBorder)
-				if isSelected {
-					rendered = m.styles.Message.SelectedBg.Render(rendered)
-				}
-				lines = append(lines, rendered)
-			}
-
+			lines = append(lines, m.renderAssistantMsg(msg, isSelected, expanded, cw)...)
 		case conversation.RoleTool:
-			if msg.ToolResult != nil {
-				display := m.formatToolResult(*msg.ToolResult, expanded)
-				line := m.addBorderPerLine(display, m.styles.Message.AssistantBorder)
-				if isSelected {
-					line = m.styles.Message.SelectedBg.Render(line)
-				}
+			if line, ok := m.renderToolMsg(msg, isSelected, expanded); ok {
 				lines = append(lines, line)
 			}
 		}
@@ -147,6 +109,62 @@ func (m Model) renderMessageHistory() string {
 	}
 
 	return content
+}
+
+func (m Model) renderSystemMsg(msg conversation.ChatMessage, isSelected bool) string {
+	line := m.styles.Message.SystemText.Render(fmt.Sprintf("System: %s", msg.Content))
+	if isSelected {
+		line = m.styles.Message.SelectedBg.Render(line)
+	}
+	return line
+}
+
+func (m Model) renderUserMsg(msg conversation.ChatMessage, isSelected bool) string {
+	border := m.styles.Message.UserBorderBlurred
+	if isSelected {
+		border = m.styles.Message.UserBorderFocused
+	}
+	rendered := m.addBorderPerLine(msg.Content, border)
+	if isSelected {
+		rendered = m.styles.Message.SelectedBg.Render(rendered)
+	}
+	return rendered
+}
+
+func (m Model) renderAssistantMsg(msg conversation.ChatMessage, isSelected, expanded bool, cw int) []string {
+	var lines []string
+	if len(msg.ToolCalls) > 0 {
+		for _, call := range msg.ToolCalls {
+			icon := m.toolStatusIcon(call.ID)
+			display := m.formatToolCall(call, expanded)
+			line := m.addBorderPerLine(icon+display, m.styles.Message.AssistantBorder)
+			if isSelected {
+				line = m.styles.Message.SelectedBg.Render(line)
+			}
+			lines = append(lines, line)
+		}
+	} else {
+		rendered := m.mdCache.GetOrRender(msg.Content, cw)
+		rendered = strings.TrimRight(rendered, "\n")
+		rendered = m.addBorderPerLine(rendered, m.styles.Message.AssistantBorder)
+		if isSelected {
+			rendered = m.styles.Message.SelectedBg.Render(rendered)
+		}
+		lines = append(lines, rendered)
+	}
+	return lines
+}
+
+func (m Model) renderToolMsg(msg conversation.ChatMessage, isSelected, expanded bool) (string, bool) {
+	if msg.ToolResult == nil {
+		return "", false
+	}
+	display := m.formatToolResult(*msg.ToolResult, expanded)
+	line := m.addBorderPerLine(display, m.styles.Message.AssistantBorder)
+	if isSelected {
+		line = m.styles.Message.SelectedBg.Render(line)
+	}
+	return line, true
 }
 
 func (m Model) renderInputArea() string {

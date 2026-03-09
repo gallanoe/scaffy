@@ -1,19 +1,18 @@
 package config
 
 import (
-	"os"
 	"testing"
 )
 
 func TestLoadDefaults(t *testing.T) {
 	// Clear all scaffy env vars, set only required
-	os.Setenv("OPENROUTER_API_KEY", "test-key")
-	os.Unsetenv("OPENROUTER_BASE_URL")
-	os.Unsetenv("SCAFFY_MODEL")
-	os.Unsetenv("SCAFFY_MAX_TOKENS")
-	os.Unsetenv("SCAFFY_TEMPERATURE")
-	os.Unsetenv("SCAFFY_SYSTEM_PROMPT")
-	os.Unsetenv("SCAFFY_ECHO_TOOL")
+	t.Setenv("OPENROUTER_API_KEY", "test-key")
+	t.Setenv("OPENROUTER_BASE_URL", "")
+	t.Setenv("SCAFFY_MODEL", "")
+	t.Setenv("SCAFFY_MAX_TOKENS", "")
+	t.Setenv("SCAFFY_TEMPERATURE", "")
+	t.Setenv("SCAFFY_SYSTEM_PROMPT", "")
+	t.Setenv("SCAFFY_ECHO_TOOL", "")
 
 	cfg, err := Load()
 	if err != nil {
@@ -41,21 +40,13 @@ func TestLoadDefaults(t *testing.T) {
 }
 
 func TestLoadFromEnv(t *testing.T) {
-	os.Setenv("OPENROUTER_API_KEY", "sk-test")
-	os.Setenv("OPENROUTER_BASE_URL", "https://custom.api/v1")
-	os.Setenv("SCAFFY_MODEL", "gpt-4")
-	os.Setenv("SCAFFY_MAX_TOKENS", "8192")
-	os.Setenv("SCAFFY_TEMPERATURE", "0.5")
-	os.Setenv("SCAFFY_SYSTEM_PROMPT", "You are helpful.")
-	os.Setenv("SCAFFY_ECHO_TOOL", "1")
-	defer func() {
-		os.Unsetenv("OPENROUTER_BASE_URL")
-		os.Unsetenv("SCAFFY_MODEL")
-		os.Unsetenv("SCAFFY_MAX_TOKENS")
-		os.Unsetenv("SCAFFY_TEMPERATURE")
-		os.Unsetenv("SCAFFY_SYSTEM_PROMPT")
-		os.Unsetenv("SCAFFY_ECHO_TOOL")
-	}()
+	t.Setenv("OPENROUTER_API_KEY", "sk-test")
+	t.Setenv("OPENROUTER_BASE_URL", "https://custom.api/v1")
+	t.Setenv("SCAFFY_MODEL", "gpt-4")
+	t.Setenv("SCAFFY_MAX_TOKENS", "8192")
+	t.Setenv("SCAFFY_TEMPERATURE", "0.5")
+	t.Setenv("SCAFFY_SYSTEM_PROMPT", "You are helpful.")
+	t.Setenv("SCAFFY_ECHO_TOOL", "1")
 
 	cfg, err := Load()
 	if err != nil {
@@ -86,7 +77,7 @@ func TestLoadFromEnv(t *testing.T) {
 }
 
 func TestLoadMissingAPIKey(t *testing.T) {
-	os.Unsetenv("OPENROUTER_API_KEY")
+	t.Setenv("OPENROUTER_API_KEY", "")
 
 	_, err := Load()
 	if err == nil {

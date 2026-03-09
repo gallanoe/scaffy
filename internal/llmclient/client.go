@@ -7,10 +7,10 @@ import (
 )
 
 type LlmClient struct {
-	client *openai.Client
-	Model  string
-	MaxTokens    int
-	Temperature  float32
+	client      *openai.Client
+	Model       string
+	MaxTokens   int
+	Temperature float32
 }
 
 func NewLlmClient(apiKey, baseURL, model string, maxTokens int, temperature float64) *LlmClient {
@@ -41,11 +41,11 @@ func (c *LlmClient) ChatStream(ctx context.Context, messages []openai.ChatComple
 
 func (c *LlmClient) doChatStream(ctx context.Context, messages []openai.ChatCompletionMessage, tools []openai.Tool, ch chan<- StreamMsg) {
 	req := openai.ChatCompletionRequest{
-		Model:       c.Model,
-		Messages:    messages,
+		Model:               c.Model,
+		Messages:            messages,
 		MaxCompletionTokens: c.MaxTokens,
-		Temperature: c.Temperature,
-		Stream:      true,
+		Temperature:         c.Temperature,
+		Stream:              true,
 	}
 	if len(tools) > 0 {
 		req.Tools = tools
@@ -56,7 +56,7 @@ func (c *LlmClient) doChatStream(ctx context.Context, messages []openai.ChatComp
 		ch <- StreamMsg{Type: StreamMsgError, Error: err.Error()}
 		return
 	}
-	defer stream.Close()
+	defer func() { _ = stream.Close() }()
 
 	acc := NewToolCallAccumulator()
 

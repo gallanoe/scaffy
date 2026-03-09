@@ -16,6 +16,10 @@ import (
 )
 
 func main() {
+	os.Exit(run())
+}
+
+func run() int {
 	// Load .env (ignore error if missing)
 	_ = godotenv.Load()
 
@@ -23,16 +27,16 @@ func main() {
 	logFile, err := os.Create("scaffy.log")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "failed to create log file: %v\n", err)
-		os.Exit(1)
+		return 1
 	}
-	defer logFile.Close()
+	defer func() { _ = logFile.Close() }()
 	slog.SetDefault(slog.New(slog.NewTextHandler(logFile, nil)))
 
 	// Load config
 	cfg, err := config.Load()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "config error: %v\n", err)
-		os.Exit(1)
+		return 1
 	}
 
 	// Create LLM client
@@ -62,6 +66,7 @@ func main() {
 
 	if _, err := p.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
-		os.Exit(1)
+		return 1
 	}
+	return 0
 }
