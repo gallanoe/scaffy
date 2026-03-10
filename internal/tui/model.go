@@ -47,6 +47,7 @@ type Model struct {
 	streamingState       StreamingState
 	partialContent       string
 	partialReasoning     string
+	reasoningCollapsed   bool
 	errorMessage         string
 	statusMsg            string
 	statusExpiry         time.Time

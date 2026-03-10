@@ -164,7 +164,7 @@ func (m *Model) toggleSelectedExpand() {
 	}
 	msg := m.conversation.Messages[idx]
 	id := msg.Metadata.ID
-	if len(msg.ToolCalls) > 0 || msg.ToolResult != nil {
+	if len(msg.ToolCalls) > 0 || msg.ToolResult != nil || msg.Reasoning != "" {
 		if m.expandedBlocks[id] {
 			delete(m.expandedBlocks, id)
 		} else {
@@ -213,6 +213,9 @@ func (m Model) handleStreamTick(msg StreamTickMsg) (tea.Model, tea.Cmd) {
 		return m, waitForStream(m.streamChan, m.streamGeneration)
 
 	case llmclient.StreamMsgToken:
+		if m.partialContent == "" && m.partialReasoning != "" {
+			m.reasoningCollapsed = true
+		}
 		m.partialContent += event.Token
 		return m, waitForStream(m.streamChan, m.streamGeneration)
 
@@ -227,7 +230,14 @@ func (m Model) handleStreamTick(msg StreamTickMsg) (tea.Model, tea.Cmd) {
 		m.finalizePartialContent()
 		if len(m.accumulatedToolCalls) > 0 {
 			// Push one assistant message with all tool calls
-			m.conversation.Push(conversation.NewAssistantToolCallsMessage(m.accumulatedToolCalls))
+			if m.partialReasoning != "" {
+				msg := conversation.NewAssistantToolCallsMessage(m.accumulatedToolCalls)
+				msg.Reasoning = m.partialReasoning
+				m.conversation.Push(msg)
+				m.partialReasoning = ""
+			} else {
+				m.conversation.Push(conversation.NewAssistantToolCallsMessage(m.accumulatedToolCalls))
+			}
 
 			// Populate pending set and fire parallel executions
 			m.pendingToolCalls = make(map[string]bool)
@@ -300,6 +310,7 @@ func (m Model) handleToolResult(msg ToolResultMsg) (tea.Model, tea.Cmd) {
 	m.streamingState = StateStreaming
 	m.partialContent = ""
 	m.partialReasoning = ""
+	m.reasoningCollapsed = false
 
 	cmd := m.startStream()
 	return m, tea.Batch(cmd, m.spinner.Tick)
@@ -322,6 +333,7 @@ func (m Model) sendMessage() (tea.Model, tea.Cmd) {
 	m.streamingState = StateStreaming
 	m.partialContent = ""
 	m.partialReasoning = ""
+	m.reasoningCollapsed = false
 	m.accumulatedToolCalls = nil
 	m.pendingToolCalls = make(map[string]bool)
 
@@ -331,8 +343,11 @@ func (m Model) sendMessage() (tea.Model, tea.Cmd) {
 
 func (m *Model) finalizePartialContent() {
 	if m.partialContent != "" {
-		m.conversation.Push(conversation.NewAssistantMessage(m.partialContent))
+		msg := conversation.NewAssistantMessage(m.partialContent)
+		msg.Reasoning = m.partialReasoning
+		m.conversation.Push(msg)
 		m.partialContent = ""
+		m.partialReasoning = ""
 	}
 }
 

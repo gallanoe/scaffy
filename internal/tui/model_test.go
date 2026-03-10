@@ -126,21 +126,19 @@ func TestViewShowsThinkingSpinner(t *testing.T) {
 	}
 }
 
-func TestViewShowsReasoningPreview(t *testing.T) {
+func TestViewShowsFullReasoningDuringStreaming(t *testing.T) {
 	m := newTestModel()
+	m.width = 120
 	m.streamingState = StateStreaming
-	m.partialReasoning = "Let me analyze the code"
+	m.partialReasoning = "Let me analyze the code carefully"
 
 	view := m.View()
 
 	if !containsString(view, "Thinking...") {
 		t.Error("expected 'Thinking...' spinner")
 	}
-	if !containsString(view, "Let me analyze the code") {
-		t.Error("expected reasoning preview in view")
-	}
-	if !containsString(view, "└─") {
-		t.Error("expected L-connector for reasoning preview")
+	if !containsString(view, "Let me analyze the code carefully") {
+		t.Error("expected full reasoning text in view")
 	}
 }
 
@@ -165,28 +163,6 @@ func TestReasoningTokenAccumulation(t *testing.T) {
 	}
 	if m.partialContent != "" {
 		t.Error("expected partialContent to remain empty during reasoning")
-	}
-}
-
-func TestReasoningPreviewTruncation(t *testing.T) {
-	m := newTestModel()
-	m.streamingState = StateStreaming
-
-	// Test truncation at 80 chars
-	m.partialReasoning = strings.Repeat("a", 100)
-	view := m.View()
-	if !containsString(view, strings.Repeat("a", 80)+"...") {
-		t.Error("expected reasoning preview truncated at 80 chars with ellipsis")
-	}
-
-	// Test truncation at newline
-	m.partialReasoning = "First line\nSecond line"
-	view = m.View()
-	if !containsString(view, "First line...") {
-		t.Error("expected reasoning preview truncated at newline")
-	}
-	if containsString(view, "Second line") {
-		t.Error("expected second line to be hidden")
 	}
 }
 
@@ -542,5 +518,148 @@ func TestToolErrorPushedAsResult(t *testing.T) {
 	}
 	if !found {
 		t.Error("expected tool result message for error")
+	}
+}
+
+func TestReasoningCollapsesOnFirstContentToken(t *testing.T) {
+	m := newTestModel()
+	m.streamGeneration = 1
+	m.streamingState = StateStreaming
+	ch := make(chan llmclient.StreamMsg, 3)
+	m.streamChan = ch
+
+	// Send reasoning tokens
+	reasoningEvent := llmclient.StreamMsg{Type: llmclient.StreamMsgReasoningToken, Token: "Step 1\nStep 2"} //nolint:gosec // not credentials
+	m = updateModel(m, StreamTickMsg{
+		Generation: 1,
+		Event:      reasoningEvent,
+	})
+
+	if m.reasoningCollapsed {
+		t.Error("expected reasoningCollapsed to be false before content")
+	}
+
+	// First content token should trigger collapse
+	m = updateModel(m, StreamTickMsg{
+		Generation: 1,
+		Event:      llmclient.StreamMsg{Type: llmclient.StreamMsgToken, Token: "Hello"},
+	})
+
+	if !m.reasoningCollapsed {
+		t.Error("expected reasoningCollapsed to be true after first content token")
+	}
+
+	view := m.View()
+	if !containsString(view, "Thinking (") {
+		t.Error("expected collapsed reasoning summary in view")
+	}
+}
+
+func TestReasoningPersistedOnFinalize(t *testing.T) {
+	m := newTestModel()
+	m.streamGeneration = 1
+	m.streamingState = StateStreaming
+	m.partialReasoning = "My reasoning here"
+	m.partialContent = "The answer is 42"
+	ch := make(chan llmclient.StreamMsg, 1)
+	m.streamChan = ch
+
+	m = updateModel(m, StreamTickMsg{
+		Generation: 1,
+		Event:      llmclient.StreamMsg{Type: llmclient.StreamMsgDone},
+	})
+
+	if m.conversation.Len() != 1 {
+		t.Fatalf("expected 1 message, got %d", m.conversation.Len())
+	}
+	msg := m.conversation.Messages[0]
+	if msg.Reasoning != "My reasoning here" {
+		t.Errorf("expected reasoning to be persisted, got %q", msg.Reasoning)
+	}
+	if msg.Content != "The answer is 42" {
+		t.Errorf("expected content 'The answer is 42', got %q", msg.Content)
+	}
+}
+
+func TestReasoningAttachesToToolCallsMessage(t *testing.T) {
+	m := newTestModel()
+	m.streamGeneration = 1
+	m.streamingState = StateStreaming
+	ch := make(chan llmclient.StreamMsg, 3)
+	m.streamChan = ch
+
+	// Reasoning tokens
+	reasoningEvent := llmclient.StreamMsg{Type: llmclient.StreamMsgReasoningToken, Token: "I should use a tool"} //nolint:gosec // not credentials
+	m = updateModel(m, StreamTickMsg{
+		Generation: 1,
+		Event:      reasoningEvent,
+	})
+
+	// Tool call
+	call := conversation.ToolCall{ID: "call_1", Name: "echo", Arguments: json.RawMessage(`{}`)}
+	m = updateModel(m, StreamTickMsg{
+		Generation: 1,
+		Event:      llmclient.StreamMsg{Type: llmclient.StreamMsgToolCallComplete, ToolCall: &call},
+	})
+
+	// Done — no content, only tool calls
+	m.pendingToolCalls = make(map[string]bool) // prevent actual tool exec
+	m = updateModel(m, StreamTickMsg{
+		Generation: 1,
+		Event:      llmclient.StreamMsg{Type: llmclient.StreamMsgDone},
+	})
+
+	// Find the assistant tool calls message
+	found := false
+	for _, msg := range m.conversation.Messages {
+		if msg.Role == conversation.RoleAssistant && len(msg.ToolCalls) > 0 {
+			if msg.Reasoning != "I should use a tool" {
+				t.Errorf("expected reasoning on tool calls message, got %q", msg.Reasoning)
+			}
+			found = true
+		}
+	}
+	if !found {
+		t.Error("expected assistant tool calls message")
+	}
+}
+
+func TestReasoningExpandCollapseInHistory(t *testing.T) {
+	m := newTestModel()
+	msg := conversation.NewAssistantMessage("The answer is 42")
+	msg.Reasoning = "Let me think\nabout this"
+	m.conversation.Push(msg)
+
+	msgID := m.conversation.Messages[0].Metadata.ID
+
+	// View should show collapsed reasoning by default
+	view := m.View()
+	if !containsString(view, "Thinking (2 lines)") {
+		t.Error("expected collapsed reasoning summary with line count")
+	}
+
+	// Switch to history, select the message
+	m.focus = FocusHistory
+	idx := 0
+	m.selectedMessage = &idx
+
+	// Expand
+	m = updateModel(m, tea.KeyMsg{Type: tea.KeyEnter})
+	if !m.expandedBlocks[msgID] {
+		t.Error("expected block to be expanded")
+	}
+
+	view = m.View()
+	if !containsString(view, "Let me think") {
+		t.Error("expected expanded reasoning text")
+	}
+	if !containsString(view, "about this") {
+		t.Error("expected full reasoning text when expanded")
+	}
+
+	// Collapse
+	m = updateModel(m, tea.KeyMsg{Type: tea.KeyEnter})
+	if m.expandedBlocks[msgID] {
+		t.Error("expected block to be collapsed")
 	}
 }

@@ -2,6 +2,7 @@ package llmclient
 
 import (
 	"context"
+	"net/http"
 
 	openai "github.com/sashabaranov/go-openai"
 )
@@ -13,9 +14,14 @@ type LlmClient struct {
 	Temperature float32
 }
 
-func NewLlmClient(apiKey, baseURL, model string, maxTokens int, temperature float64) *LlmClient {
+func NewLlmClient(apiKey, baseURL, model string, maxTokens int, temperature float64, reasoning *ReasoningConfig) *LlmClient {
 	config := openai.DefaultConfig(apiKey)
 	config.BaseURL = baseURL
+
+	if reasoning != nil {
+		var base httpDoer = &http.Client{}
+		config.HTTPClient = NewReasoningDoer(base, *reasoning)
+	}
 
 	return &LlmClient{
 		client:      openai.NewClientWithConfig(config),

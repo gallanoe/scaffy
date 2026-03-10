@@ -8,16 +8,23 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+type ReasoningConfig struct {
+	Effort    string `yaml:"effort"`
+	MaxTokens int    `yaml:"max_tokens"`
+	Exclude   bool   `yaml:"exclude"`
+}
+
 type Config struct {
-	APIKey       string   `yaml:"api_key"`
-	BaseURL      string   `yaml:"base_url"`
-	Model        string   `yaml:"model"`
-	MaxTokens    int      `yaml:"max_tokens"`
-	Temperature  float64  `yaml:"temperature"`
-	SystemPrompt string   `yaml:"system_prompt"`
-	BashTimeout  int      `yaml:"bash_timeout"`
-	BraveAPIKey  string   `yaml:"brave_api_key"`
-	Tools        []string `yaml:"tools"`
+	APIKey       string           `yaml:"api_key"`
+	BaseURL      string           `yaml:"base_url"`
+	Model        string           `yaml:"model"`
+	MaxTokens    int              `yaml:"max_tokens"`
+	Temperature  float64          `yaml:"temperature"`
+	SystemPrompt string           `yaml:"system_prompt"`
+	BashTimeout  int              `yaml:"bash_timeout"`
+	BraveAPIKey  string           `yaml:"brave_api_key"`
+	Tools        []string         `yaml:"tools"`
+	Reasoning    *ReasoningConfig `yaml:"reasoning"`
 }
 
 func Load() (*Config, error) {
@@ -91,5 +98,11 @@ func applyEnvOverrides(cfg *Config) {
 	}
 	if v := os.Getenv("BRAVE_API_KEY"); v != "" {
 		cfg.BraveAPIKey = v
+	}
+	if v := os.Getenv("SCAFFY_REASONING_EFFORT"); v != "" {
+		if cfg.Reasoning == nil {
+			cfg.Reasoning = &ReasoningConfig{}
+		}
+		cfg.Reasoning.Effort = v
 	}
 }

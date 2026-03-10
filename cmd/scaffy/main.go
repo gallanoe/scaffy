@@ -36,12 +36,21 @@ func run() int {
 	}
 
 	// Create LLM client
+	var reasoning *llmclient.ReasoningConfig
+	if cfg.Reasoning != nil {
+		reasoning = &llmclient.ReasoningConfig{
+			Effort:    cfg.Reasoning.Effort,
+			MaxTokens: cfg.Reasoning.MaxTokens,
+			Exclude:   cfg.Reasoning.Exclude,
+		}
+	}
 	client := llmclient.NewLlmClient(
 		cfg.APIKey,
 		cfg.BaseURL,
 		cfg.Model,
 		cfg.MaxTokens,
 		cfg.Temperature,
+		reasoning,
 	)
 
 	// Map of all available tools

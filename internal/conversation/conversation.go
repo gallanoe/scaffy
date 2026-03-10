@@ -44,6 +44,7 @@ func newMetadata() MessageMetadata {
 type ChatMessage struct {
 	Role       Role            `json:"role"`
 	Content    string          `json:"content,omitempty"`
+	Reasoning  string          `json:"reasoning,omitempty"`
 	ToolCalls  []ToolCall      `json:"tool_calls,omitempty"`
 	ToolResult *ToolResult     `json:"tool_result,omitempty"`
 	Metadata   MessageMetadata `json:"metadata"`

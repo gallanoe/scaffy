@@ -11,7 +11,7 @@ func clearEnv(t *testing.T) {
 	for _, key := range []string{
 		"OPENROUTER_API_KEY", "OPENROUTER_BASE_URL",
 		"SCAFFY_MODEL", "SCAFFY_MAX_TOKENS", "SCAFFY_TEMPERATURE",
-		"SCAFFY_SYSTEM_PROMPT", "BRAVE_API_KEY",
+		"SCAFFY_SYSTEM_PROMPT", "BRAVE_API_KEY", "SCAFFY_REASONING_EFFORT",
 	} {
 		t.Setenv(key, "")
 	}
@@ -201,6 +201,110 @@ func TestLoadMissingAPIKey(t *testing.T) {
 	_, err := Load()
 	if err == nil {
 		t.Fatal("expected error for missing API key")
+	}
+}
+
+func TestReasoningNilByDefault(t *testing.T) {
+	clearEnv(t)
+	t.Setenv("OPENROUTER_API_KEY", "test-key")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.Reasoning != nil {
+		t.Errorf("expected nil reasoning by default, got %+v", cfg.Reasoning)
+	}
+}
+
+func TestReasoningFromYAML(t *testing.T) {
+	clearEnv(t)
+
+	dir := t.TempDir()
+	yamlContent := `api_key: "sk-yaml-key"
+reasoning:
+  effort: high
+  max_tokens: 4096
+  exclude: true
+`
+	if err := os.WriteFile(filepath.Join(dir, "scaffy.yaml"), []byte(yamlContent), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	origDir, _ := os.Getwd()
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(origDir) })
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.Reasoning == nil {
+		t.Fatal("expected reasoning config from YAML")
+	}
+	if cfg.Reasoning.Effort != "high" {
+		t.Errorf("expected effort 'high', got %q", cfg.Reasoning.Effort)
+	}
+	if cfg.Reasoning.MaxTokens != 4096 {
+		t.Errorf("expected max_tokens 4096, got %d", cfg.Reasoning.MaxTokens)
+	}
+	if !cfg.Reasoning.Exclude {
+		t.Error("expected exclude true")
+	}
+}
+
+func TestReasoningEffortEnvOverride(t *testing.T) {
+	clearEnv(t)
+	t.Setenv("OPENROUTER_API_KEY", "test-key")
+	t.Setenv("SCAFFY_REASONING_EFFORT", "medium")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.Reasoning == nil {
+		t.Fatal("expected reasoning config from env var")
+	}
+	if cfg.Reasoning.Effort != "medium" {
+		t.Errorf("expected effort 'medium', got %q", cfg.Reasoning.Effort)
+	}
+}
+
+func TestReasoningEffortEnvOverridesYAML(t *testing.T) {
+	clearEnv(t)
+
+	dir := t.TempDir()
+	yamlContent := `api_key: "sk-yaml-key"
+reasoning:
+  effort: low
+  max_tokens: 2048
+`
+	if err := os.WriteFile(filepath.Join(dir, "scaffy.yaml"), []byte(yamlContent), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	origDir, _ := os.Getwd()
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(origDir) })
+
+	t.Setenv("SCAFFY_REASONING_EFFORT", "high")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.Reasoning == nil {
+		t.Fatal("expected reasoning config")
+	}
+	if cfg.Reasoning.Effort != "high" {
+		t.Errorf("env should override YAML effort, got %q", cfg.Reasoning.Effort)
+	}
+	if cfg.Reasoning.MaxTokens != 2048 {
+		t.Errorf("max_tokens should remain from YAML, got %d", cfg.Reasoning.MaxTokens)
 	}
 }
 

@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/muesli/reflow/wordwrap"
 
 	"github.com/gallanoe/scaffy/internal/conversation"
 )
@@ -137,6 +138,28 @@ func (m Model) renderUserMsg(msg conversation.ChatMessage, isSelected bool) stri
 
 func (m Model) renderAssistantMsg(msg conversation.ChatMessage, isSelected, expanded bool, cw int) []string {
 	var lines []string
+	// Reasoning block (collapsed/expanded)
+	if msg.Reasoning != "" {
+		nLines := strings.Count(msg.Reasoning, "\n") + 1
+		if expanded {
+			header := m.styles.Text.HalfMuted.Render(fmt.Sprintf("▾ Thinking (%d lines)", nLines))
+			lines = append(lines, m.addBorderPerLine(header, m.styles.Message.AssistantBorder))
+			wrapped := wordwrap.String(msg.Reasoning, cw-4)
+			reasonBlock := m.styles.Text.Muted.Render(wrapped)
+			reasonLine := m.addBorderPerLine(reasonBlock, m.styles.Message.AssistantBorder)
+			if isSelected {
+				reasonLine = m.styles.Message.SelectedBg.Render(reasonLine)
+			}
+			lines = append(lines, reasonLine)
+		} else {
+			summary := m.styles.Text.HalfMuted.Render(fmt.Sprintf("▸ Thinking (%d lines)", nLines))
+			line := m.addBorderPerLine(summary, m.styles.Message.AssistantBorder)
+			if isSelected {
+				line = m.styles.Message.SelectedBg.Render(line)
+			}
+			lines = append(lines, line)
+		}
+	}
 	if len(msg.ToolCalls) > 0 {
 		for _, call := range msg.ToolCalls {
 			icon := m.toolStatusIcon(call.ID)
@@ -184,10 +207,17 @@ func (m Model) renderInputArea() string {
 
 func (m Model) renderStreamingBlock(cw int) []string {
 	if m.partialContent != "" {
+		var lines []string
+		// Collapsed reasoning summary
+		if m.partialReasoning != "" {
+			nLines := strings.Count(m.partialReasoning, "\n") + 1
+			summary := m.styles.Text.HalfMuted.Render(fmt.Sprintf("▸ Thinking (%d lines)", nLines))
+			lines = append(lines, m.addBorderPerLine(summary, m.styles.Message.AssistantBorder))
+		}
 		rendered := m.mdCache.GetOrRender(m.partialContent, cw)
 		rendered = strings.TrimRight(rendered, "\n")
-		partial := m.addBorderPerLine(rendered, m.styles.Message.AssistantBorder)
-		return []string{partial}
+		lines = append(lines, m.addBorderPerLine(rendered, m.styles.Message.AssistantBorder))
+		return lines
 	}
 
 	spinnerLine := m.spinner.View() + m.styles.Text.Muted.Render(" Thinking...")
@@ -195,15 +225,8 @@ func (m Model) renderStreamingBlock(cw int) []string {
 	lines := []string{spinnerLine}
 
 	if m.partialReasoning != "" {
-		preview := m.partialReasoning
-		cutoff := 80
-		if nl := strings.IndexByte(preview, '\n'); nl >= 0 && nl < cutoff {
-			cutoff = nl
-		}
-		if len(preview) > cutoff {
-			preview = preview[:cutoff] + "..."
-		}
-		reasonLine := "   └─ " + m.styles.Text.Muted.Render(preview)
+		wrapped := wordwrap.String(m.partialReasoning, cw-4)
+		reasonLine := m.styles.Text.Muted.Render(wrapped)
 		reasonLine = m.addBorderPerLine(reasonLine, m.styles.Message.AssistantBorder)
 		lines = append(lines, reasonLine)
 	}
