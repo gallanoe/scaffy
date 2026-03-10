@@ -208,6 +208,10 @@ func (m Model) handleStreamTick(msg StreamTickMsg) (tea.Model, tea.Cmd) {
 
 	event := msg.Event
 	switch event.Type {
+	case llmclient.StreamMsgReasoningToken:
+		m.partialReasoning += event.Token
+		return m, waitForStream(m.streamChan, m.streamGeneration)
+
 	case llmclient.StreamMsgToken:
 		m.partialContent += event.Token
 		return m, waitForStream(m.streamChan, m.streamGeneration)
@@ -295,6 +299,7 @@ func (m Model) handleToolResult(msg ToolResultMsg) (tea.Model, tea.Cmd) {
 	m.streamGeneration++
 	m.streamingState = StateStreaming
 	m.partialContent = ""
+	m.partialReasoning = ""
 
 	cmd := m.startStream()
 	return m, tea.Batch(cmd, m.spinner.Tick)
@@ -316,6 +321,7 @@ func (m Model) sendMessage() (tea.Model, tea.Cmd) {
 	m.streamGeneration++
 	m.streamingState = StateStreaming
 	m.partialContent = ""
+	m.partialReasoning = ""
 	m.accumulatedToolCalls = nil
 	m.pendingToolCalls = make(map[string]bool)
 

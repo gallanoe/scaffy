@@ -107,11 +107,86 @@ func TestViewContainsSpinnerWhenStreaming(t *testing.T) {
 
 	view := m.View()
 
-	if !containsString(view, "Thinking...") {
-		t.Error("expected 'Thinking...' spinner label in view")
+	if containsString(view, "Thinking...") {
+		t.Error("expected 'Thinking...' spinner to be absent when content is streaming")
 	}
 	if !containsString(view, "Hello") {
 		t.Error("expected partial content in view")
+	}
+}
+
+func TestViewShowsThinkingSpinner(t *testing.T) {
+	m := newTestModel()
+	m.streamingState = StateStreaming
+
+	view := m.View()
+
+	if !containsString(view, "Thinking...") {
+		t.Error("expected 'Thinking...' spinner when no content yet")
+	}
+}
+
+func TestViewShowsReasoningPreview(t *testing.T) {
+	m := newTestModel()
+	m.streamingState = StateStreaming
+	m.partialReasoning = "Let me analyze the code"
+
+	view := m.View()
+
+	if !containsString(view, "Thinking...") {
+		t.Error("expected 'Thinking...' spinner")
+	}
+	if !containsString(view, "Let me analyze the code") {
+		t.Error("expected reasoning preview in view")
+	}
+	if !containsString(view, "└─") {
+		t.Error("expected L-connector for reasoning preview")
+	}
+}
+
+func TestReasoningTokenAccumulation(t *testing.T) {
+	m := newTestModel()
+	m.streamGeneration = 1
+	m.streamingState = StateStreaming
+	ch := make(chan llmclient.StreamMsg, 3)
+	m.streamChan = ch
+
+	m = updateModel(m, StreamTickMsg{
+		Generation: 1,
+		Event:      llmclient.StreamMsg{Type: llmclient.StreamMsgReasoningToken, Token: "Let me "},
+	})
+	m = updateModel(m, StreamTickMsg{
+		Generation: 1,
+		Event:      llmclient.StreamMsg{Type: llmclient.StreamMsgReasoningToken, Token: "think"},
+	})
+
+	if m.partialReasoning != "Let me think" {
+		t.Errorf("expected 'Let me think', got %q", m.partialReasoning)
+	}
+	if m.partialContent != "" {
+		t.Error("expected partialContent to remain empty during reasoning")
+	}
+}
+
+func TestReasoningPreviewTruncation(t *testing.T) {
+	m := newTestModel()
+	m.streamingState = StateStreaming
+
+	// Test truncation at 80 chars
+	m.partialReasoning = strings.Repeat("a", 100)
+	view := m.View()
+	if !containsString(view, strings.Repeat("a", 80)+"...") {
+		t.Error("expected reasoning preview truncated at 80 chars with ellipsis")
+	}
+
+	// Test truncation at newline
+	m.partialReasoning = "First line\nSecond line"
+	view = m.View()
+	if !containsString(view, "First line...") {
+		t.Error("expected reasoning preview truncated at newline")
+	}
+	if containsString(view, "Second line") {
+		t.Error("expected second line to be hidden")
 	}
 }
 

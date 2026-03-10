@@ -77,6 +77,11 @@ func (c *LlmClient) doChatStream(ctx context.Context, messages []openai.ChatComp
 		}
 		choice := resp.Choices[0]
 
+		// Reasoning tokens
+		if choice.Delta.ReasoningContent != "" {
+			ch <- StreamMsg{Type: StreamMsgReasoningToken, Token: choice.Delta.ReasoningContent}
+		}
+
 		// Content tokens
 		if choice.Delta.Content != "" {
 			ch <- StreamMsg{Type: StreamMsgToken, Token: choice.Delta.Content}

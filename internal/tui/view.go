@@ -98,15 +98,7 @@ func (m Model) renderMessageHistory() string {
 
 	// Streaming content + spinner
 	if m.streamingState == StateStreaming {
-		if m.partialContent != "" {
-			rendered := m.mdCache.GetOrRender(m.partialContent, cw)
-			rendered = strings.TrimRight(rendered, "\n")
-			partial := m.addBorderPerLine(rendered, m.styles.Message.AssistantBorder)
-			lines = append(lines, partial)
-		}
-		spinnerLine := m.spinner.View() + m.styles.Text.Muted.Render(" Thinking...")
-		spinnerLine = m.addBorderPerLine(spinnerLine, m.styles.Message.AssistantBorder)
-		lines = append(lines, spinnerLine)
+		lines = append(lines, m.renderStreamingBlock(cw)...)
 	}
 
 	content := strings.Join(lines, "\n")
@@ -188,6 +180,35 @@ func (m Model) renderInputArea() string {
 	return style.
 		Width(m.width - 2).
 		Render(m.textarea.View())
+}
+
+func (m Model) renderStreamingBlock(cw int) []string {
+	if m.partialContent != "" {
+		rendered := m.mdCache.GetOrRender(m.partialContent, cw)
+		rendered = strings.TrimRight(rendered, "\n")
+		partial := m.addBorderPerLine(rendered, m.styles.Message.AssistantBorder)
+		return []string{partial}
+	}
+
+	spinnerLine := m.spinner.View() + m.styles.Text.Muted.Render(" Thinking...")
+	spinnerLine = m.addBorderPerLine(spinnerLine, m.styles.Message.AssistantBorder)
+	lines := []string{spinnerLine}
+
+	if m.partialReasoning != "" {
+		preview := m.partialReasoning
+		cutoff := 80
+		if nl := strings.IndexByte(preview, '\n'); nl >= 0 && nl < cutoff {
+			cutoff = nl
+		}
+		if len(preview) > cutoff {
+			preview = preview[:cutoff] + "..."
+		}
+		reasonLine := "   └─ " + m.styles.Text.Muted.Render(preview)
+		reasonLine = m.addBorderPerLine(reasonLine, m.styles.Message.AssistantBorder)
+		lines = append(lines, reasonLine)
+	}
+
+	return lines
 }
 
 func (m Model) addBorderPerLine(text, border string) string {

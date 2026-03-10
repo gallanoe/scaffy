@@ -14,6 +14,7 @@ type StreamMsgType int
 
 const (
 	StreamMsgToken StreamMsgType = iota
+	StreamMsgReasoningToken
 	StreamMsgToolCallStart
 	StreamMsgToolCallArgDelta
 	StreamMsgToolCallComplete

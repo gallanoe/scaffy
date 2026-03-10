@@ -46,6 +46,7 @@ type Model struct {
 	focus                AppFocus
 	streamingState       StreamingState
 	partialContent       string
+	partialReasoning     string
 	errorMessage         string
 	statusMsg            string
 	statusExpiry         time.Time
