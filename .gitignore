@@ -1,5 +1,5 @@
 /scaffy
 coverage.out
 scaffy.log
-.claude/settings.local.json
+.claude/
 scaffy.yaml

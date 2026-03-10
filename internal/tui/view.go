@@ -245,11 +245,15 @@ func (m Model) formatToolResult(result conversation.ToolResult, expanded bool) s
 		return label + m.styles.Tool.ResultContent.Render(result.Content)
 	}
 	content := result.Content
-	if len(content) > 80 {
-		lineCount := strings.Count(result.Content, "\n") + 1
-		sizeStr := humanBytes(len(result.Content))
+	cutoff := 80
+	if nl := strings.IndexByte(content, '\n'); nl >= 0 && nl < cutoff {
+		cutoff = nl
+	}
+	if len(content) > cutoff {
+		lineCount := strings.Count(content, "\n") + 1
+		sizeStr := humanBytes(len(content))
 		summary := m.styles.Text.HalfMuted.Render(fmt.Sprintf(" (%d lines, %s)", lineCount, sizeStr))
-		return label + m.styles.Tool.ResultContent.Render(content[:80]+"...") + summary
+		return label + m.styles.Tool.ResultContent.Render(content[:cutoff]+"...") + summary
 	}
 	return label + m.styles.Tool.ResultContent.Render(content)
 }
