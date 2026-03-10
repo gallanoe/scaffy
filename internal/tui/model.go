@@ -22,6 +22,7 @@ type AppFocus int
 const (
 	FocusInput AppFocus = iota
 	FocusHistory
+	FocusMessage
 )
 
 type StreamingState int
@@ -58,6 +59,7 @@ type Model struct {
 	accumulatedToolCalls []conversation.ToolCall
 	quitting             bool
 	streamChan           <-chan llmclient.StreamMsg
+	historyYOffset       int
 	width                int
 	height               int
 	viewportReady        bool

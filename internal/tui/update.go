@@ -67,6 +67,8 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.handleInputKey(msg)
 	case FocusHistory:
 		return m.handleHistoryKey(msg)
+	case FocusMessage:
+		return m.handleMessageKey(msg)
 	}
 	return m, nil
 }
@@ -135,7 +137,9 @@ func (m Model) handleHistoryKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyEnter:
-		m.toggleSelectedExpand()
+		m.historyYOffset = m.viewport.YOffset
+		m.focus = FocusMessage
+		m.viewport.GotoTop()
 		return m, nil
 
 	case tea.KeyTab:
@@ -151,6 +155,29 @@ func (m Model) handleHistoryKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	default:
 		return m, nil
+	}
+}
+
+func (m Model) handleMessageKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.Type {
+	case tea.KeyCtrlC:
+		m.quitting = true
+		return m, tea.Quit
+
+	case tea.KeyEsc:
+		m.focus = FocusHistory
+		m.viewport.SetYOffset(m.historyYOffset)
+		return m, nil
+
+	case tea.KeyEnter:
+		m.toggleSelectedExpand()
+		m.viewport.GotoTop()
+		return m, nil
+
+	default:
+		var cmd tea.Cmd
+		m.viewport, cmd = m.viewport.Update(msg)
+		return m, cmd
 	}
 }
 

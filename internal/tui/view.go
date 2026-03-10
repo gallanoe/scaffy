@@ -54,16 +54,38 @@ func (m Model) renderStatusBar() string {
 		return m.styles.StatusBar.Base.Width(m.width).Render(label + msg + hint)
 	}
 
-	hints := []string{
-		m.styles.StatusBar.HintKey.Render("Tab") + m.styles.StatusBar.HintDesc.Render(" focus"),
-		m.styles.StatusBar.HintKey.Render("Enter") + m.styles.StatusBar.HintDesc.Render(" send"),
-		m.styles.StatusBar.HintKey.Render("Alt+Enter") + m.styles.StatusBar.HintDesc.Render(" newline"),
-		m.styles.StatusBar.HintKey.Render("Ctrl+C") + m.styles.StatusBar.HintDesc.Render(" quit"),
+	sep := m.styles.Text.Subtle.Render(" · ")
+	var hints []string
+
+	switch m.focus {
+	case FocusMessage:
+		hints = []string{
+			m.styles.StatusBar.HintKey.Render("↑↓") + m.styles.StatusBar.HintDesc.Render(" scroll"),
+			m.styles.StatusBar.HintKey.Render("Enter") + m.styles.StatusBar.HintDesc.Render(" expand"),
+			m.styles.StatusBar.HintKey.Render("Esc") + m.styles.StatusBar.HintDesc.Render(" back"),
+		}
+	case FocusHistory:
+		hints = []string{
+			m.styles.StatusBar.HintKey.Render("↑↓") + m.styles.StatusBar.HintDesc.Render(" navigate"),
+			m.styles.StatusBar.HintKey.Render("Enter") + m.styles.StatusBar.HintDesc.Render(" open"),
+			m.styles.StatusBar.HintKey.Render("Tab") + m.styles.StatusBar.HintDesc.Render("/") + m.styles.StatusBar.HintKey.Render("Esc") + m.styles.StatusBar.HintDesc.Render(" input"),
+		}
+	default:
+		hints = []string{
+			m.styles.StatusBar.HintKey.Render("Tab") + m.styles.StatusBar.HintDesc.Render(" focus"),
+			m.styles.StatusBar.HintKey.Render("Enter") + m.styles.StatusBar.HintDesc.Render(" send"),
+			m.styles.StatusBar.HintKey.Render("Alt+Enter") + m.styles.StatusBar.HintDesc.Render(" newline"),
+			m.styles.StatusBar.HintKey.Render("Ctrl+C") + m.styles.StatusBar.HintDesc.Render(" quit"),
+		}
 	}
-	return m.styles.StatusBar.Base.Width(m.width).Render(strings.Join(hints, m.styles.Text.Subtle.Render(" · ")))
+	return m.styles.StatusBar.Base.Width(m.width).Render(strings.Join(hints, sep))
 }
 
 func (m Model) renderMessageHistory() string {
+	if m.focus == FocusMessage {
+		return m.renderFocusedMessage()
+	}
+
 	var lines []string
 	cw := m.contentWidth()
 
@@ -110,6 +132,56 @@ func (m Model) renderMessageHistory() string {
 		if m.focus != FocusHistory {
 			m.viewport.GotoBottom()
 		}
+		return m.viewport.View()
+	}
+
+	return content
+}
+
+func (m Model) renderFocusedMessage() string {
+	if m.selectedMessage == nil || *m.selectedMessage >= m.conversation.Len() {
+		return ""
+	}
+
+	idx := *m.selectedMessage
+	msg := m.conversation.Messages[idx]
+	cw := m.contentWidth()
+	expanded := m.expandedBlocks[msg.Metadata.ID]
+
+	// Count visible messages for position display
+	visibleIdx := 0
+	visibleTotal := 0
+	for i, cm := range m.conversation.Messages {
+		if cm.Role == conversation.RoleTool {
+			continue
+		}
+		visibleTotal++
+		if i < idx {
+			visibleIdx++
+		}
+	}
+	visibleIdx++ // 1-based
+
+	// Header line
+	role := string(msg.Role)
+	roleLabel := strings.ToUpper(role[:1]) + role[1:]
+	header := m.styles.Text.HalfMuted.Render(fmt.Sprintf("── %s %d/%d ──", roleLabel, visibleIdx, visibleTotal))
+
+	// Render the single message
+	var msgLines []string
+	switch msg.Role {
+	case conversation.RoleSystem:
+		msgLines = append(msgLines, m.renderSystemMsg(msg, false))
+	case conversation.RoleUser:
+		msgLines = append(msgLines, m.renderUserMsg(msg, false))
+	case conversation.RoleAssistant:
+		msgLines = append(msgLines, m.renderAssistantMsg(msg, false, expanded, cw)...)
+	}
+
+	content := header + "\n\n" + strings.Join(msgLines, "\n")
+
+	if m.viewportReady {
+		m.viewport.SetContent(content)
 		return m.viewport.View()
 	}
 

@@ -331,7 +331,13 @@ func TestToggleExpandToolBlock(t *testing.T) {
 	idx := 0
 	m.selectedMessage = &idx
 
-	// Toggle expand
+	// Enter opens FocusMessage
+	m = updateModel(m, tea.KeyMsg{Type: tea.KeyEnter})
+	if m.focus != FocusMessage {
+		t.Fatal("expected FocusMessage after Enter in history")
+	}
+
+	// Enter in FocusMessage toggles expand
 	m = updateModel(m, tea.KeyMsg{Type: tea.KeyEnter})
 	if !m.expandedBlocks[msgID] {
 		t.Error("expected block to be expanded")
@@ -643,7 +649,13 @@ func TestReasoningExpandCollapseInHistory(t *testing.T) {
 	idx := 0
 	m.selectedMessage = &idx
 
-	// Expand
+	// Enter opens FocusMessage
+	m = updateModel(m, tea.KeyMsg{Type: tea.KeyEnter})
+	if m.focus != FocusMessage {
+		t.Fatal("expected FocusMessage after Enter in history")
+	}
+
+	// Enter in FocusMessage expands
 	m = updateModel(m, tea.KeyMsg{Type: tea.KeyEnter})
 	if !m.expandedBlocks[msgID] {
 		t.Error("expected block to be expanded")
@@ -661,5 +673,81 @@ func TestReasoningExpandCollapseInHistory(t *testing.T) {
 	m = updateModel(m, tea.KeyMsg{Type: tea.KeyEnter})
 	if m.expandedBlocks[msgID] {
 		t.Error("expected block to be collapsed")
+	}
+}
+
+func TestEnterOpensFocusMessage(t *testing.T) {
+	m := newTestModel()
+	m.conversation.Push(conversation.NewUserMessage("hello"))
+	m.conversation.Push(conversation.NewAssistantMessage("world"))
+
+	// Switch to history
+	m.focus = FocusHistory
+	idx := 1
+	m.selectedMessage = &idx
+
+	// Enter should open FocusMessage
+	m = updateModel(m, tea.KeyMsg{Type: tea.KeyEnter})
+	if m.focus != FocusMessage {
+		t.Error("expected FocusMessage after Enter in history")
+	}
+	if m.selectedMessage == nil || *m.selectedMessage != 1 {
+		t.Error("expected selectedMessage to remain at 1")
+	}
+}
+
+func TestEscFromFocusMessageReturnsToHistory(t *testing.T) {
+	m := newTestModel()
+	m.conversation.Push(conversation.NewUserMessage("hello"))
+
+	m.focus = FocusMessage
+	idx := 0
+	m.selectedMessage = &idx
+
+	m = updateModel(m, tea.KeyMsg{Type: tea.KeyEsc})
+
+	if m.focus != FocusHistory {
+		t.Error("expected FocusHistory after Esc from FocusMessage")
+	}
+	if m.selectedMessage == nil || *m.selectedMessage != 0 {
+		t.Error("expected selectedMessage to be preserved")
+	}
+}
+
+func TestCtrlCFromFocusMessage(t *testing.T) {
+	m := newTestModel()
+	m.focus = FocusMessage
+
+	m = updateModel(m, tea.KeyMsg{Type: tea.KeyCtrlC})
+
+	if !m.quitting {
+		t.Error("expected quitting to be true after Ctrl+C in FocusMessage")
+	}
+}
+
+func TestExpandInFocusMessage(t *testing.T) {
+	m := newTestModel()
+	calls := []conversation.ToolCall{{
+		ID:        "call_1",
+		Name:      "echo",
+		Arguments: json.RawMessage(`{"message":"hi"}`),
+	}}
+	m.conversation.Push(conversation.NewAssistantToolCallsMessage(calls))
+	msgID := m.conversation.Messages[0].Metadata.ID
+
+	m.focus = FocusMessage
+	idx := 0
+	m.selectedMessage = &idx
+
+	// Enter in FocusMessage toggles expand
+	m = updateModel(m, tea.KeyMsg{Type: tea.KeyEnter})
+	if !m.expandedBlocks[msgID] {
+		t.Error("expected block to be expanded in FocusMessage")
+	}
+
+	// Toggle back
+	m = updateModel(m, tea.KeyMsg{Type: tea.KeyEnter})
+	if m.expandedBlocks[msgID] {
+		t.Error("expected block to be collapsed after second Enter")
 	}
 }
